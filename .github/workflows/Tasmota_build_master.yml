@@ -16,7 +16,9 @@ concurrency:
 jobs:
   safeboot-images:
     runs-on: ubuntu-latest
-    if: github.repository == '**/Tasmota'
+    #if: github.repository == 'arendst/Tasmota'
+    #if: github.repository == '${{GITHUB_ACTOR}}/Tasmota'
+
     continue-on-error: false
     strategy:
       matrix:
@@ -42,6 +44,8 @@ jobs:
           python-version: '3.x'
       - name: Install dependencies
         run: |
+          #echo "'${{GITHUB_ACTOR}}/Tasmota': ${{GITHUB_ACTOR}}/Tasmota"
+          #echo "'${{ github.actor }}/Tasmota': ${{ github.actor }}/Tasmota"
           pip install wheel
           pip install -U platformio
           cp ./platformio_override_sample.ini ./platformio_override.ini
