@@ -16,7 +16,7 @@ concurrency:
 jobs:
   safeboot-images:
     runs-on: ubuntu-latest
-    if: github.repository == '**/Tasmota'
+    #if: github.repository == '**/Tasmota'
     continue-on-error: false
     strategy:
       matrix:
