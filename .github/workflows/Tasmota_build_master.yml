@@ -17,7 +17,7 @@ jobs:
   safeboot-images:
     runs-on: ubuntu-latest
     #if: github.repository == 'arendst/Tasmota'
-    if: github.repository == "${GITHUB_ACTOR}/Tasmota"
+    if: github.repository == '${GITHUB_ACTOR}/Tasmota'
 
     continue-on-error: false
     strategy:
