@@ -6,6 +6,28 @@ All notable changes to this project will be documented in this file.
 ## [14.6.0] 20250416
 - Release Ryan
 
+
+## [14.6.0.1] 
+### Added
+- Command `JsonPP 0..7` to enable (>0) JSON Pretty Print on user interfaces and set number of indents
+
+### Breaking Changed
+
+### Changed
+
+### Fixed
+- Berry `bytes().asstring()` now truncates a string if buffer contains NULL (#23311)
+- Berry string literals containing NULL are truncated (#23312)
+
+### Removed
+
+
+
+## [Released]
+
+## [14.6.0] 20250416
+- Release Ryan
+
 ## [14.5.0.3] 20250416
 ### Added
 - Extend command `GPIO` with different display options and allowing updating of module GPIO's in one go

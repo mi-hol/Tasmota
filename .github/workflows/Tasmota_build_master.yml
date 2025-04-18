@@ -16,22 +16,24 @@ concurrency:
 jobs:
   safeboot-images:
     runs-on: ubuntu-latest
-    if: github.repository == 'arendst/Tasmota'
-    continue-on-error: true
+    #if: github.repository == 'arendst/Tasmota'
+    #if: github.repository == '${{GITHUB_ACTOR}}/Tasmota'
+
+    continue-on-error: false
     strategy:
       matrix:
         variant:
           - tasmota32-safeboot
-          - tasmota32solo1-safeboot
-          - tasmota32c2-safeboot
+          #- tasmota32solo1-safeboot
+          #- tasmota32c2-safeboot
           - tasmota32c3-safeboot
-          - tasmota32c3ser-safeboot
-          - tasmota32s2-safeboot
-          - tasmota32s2cdc-safeboot
-          - tasmota32s3-safeboot
-          - tasmota32s3ser-safeboot
+          #- tasmota32c3ser-safeboot
+          #- tasmota32s2-safeboot
+          #- tasmota32s2cdc-safeboot
+          #- tasmota32s3-safeboot
+          #- tasmota32s3ser-safeboot
           - tasmota32c6-safeboot
-          - tasmota32c6ser-safeboot
+          #- tasmota32c6ser-safeboot
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,12 +44,14 @@ jobs:
           python-version: '3.x'
       - name: Install dependencies
         run: |
+          #echo "'${{GITHUB_ACTOR}}/Tasmota': ${{GITHUB_ACTOR}}/Tasmota"
+          #echo "'${{ github.actor }}/Tasmota': ${{ github.actor }}/Tasmota"
           pip install wheel
           pip install -U platformio
           cp ./platformio_override_sample.ini ./platformio_override.ini
       - name: Add "release" to footer
         run: |
-          sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
+          #sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
       - name: Run PlatformIO
         run: platformio run -e ${{ matrix.variant }}
       - name: Upload safeboot firmware artifacts
@@ -66,13 +70,13 @@ jobs:
           - tasmota
           - tasmota-4M
           - tasmota-minimal
-          - tasmota-display
-          - tasmota-ir
-          - tasmota-knx
-          - tasmota-lite
-          - tasmota-sensors
-          - tasmota-zbbridge
-          - tasmota-zigbee
+          #- tasmota-display
+          #- tasmota-ir
+          #- tasmota-knx
+          #- tasmota-lite
+          #- tasmota-sensors
+          #- tasmota-zbbridge
+          #- tasmota-zigbee
     steps:
       - uses: actions/checkout@v4
         with:
@@ -88,7 +92,7 @@ jobs:
           cp ./platformio_override_sample.ini ./platformio_override.ini
       - name: Add "release" to footer
         run: |
-          sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
+          #sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
       - name: Run PlatformIO
         run: platformio run -e ${{ matrix.variant }}
       - name: Upload firmware artifacts
@@ -106,20 +110,20 @@ jobs:
       matrix:
         variant:
           - tasmota32
-          - tasmota32-zbbrdgpro
-          - tasmota32-webcam
-          - tasmota32-bluetooth
-          - tasmota32-nspanel
-          - tasmota32-display
-          - tasmota32-ir
-          - tasmota32-lvgl
-          - tasmota32c2
+          #- tasmota32-zbbrdgpro
+          #- tasmota32-webcam
+          #- tasmota32-bluetooth
+          #- tasmota32-nspanel
+          #- tasmota32-display
+          #- tasmota32-ir
+          #- tasmota32-lvgl
+          #- tasmota32c2
           - tasmota32c3
           - tasmota32c6
-          - tasmota32s2
-          - tasmota32s2cdc
-          - tasmota32s3
-          - tasmota32solo1
+          #- tasmota32s2
+          #- tasmota32s2cdc
+          #- tasmota32s3
+          #- tasmota32solo1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -144,7 +148,7 @@ jobs:
           find ./temp -type f -exec cp -t ./firmware/firmware {} +
       - name: Add "release" to footer
         run: |
-          sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
+          #sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
       - name: Run PlatformIO
         run: platformio run -e ${{ matrix.variant }}
       - name: Upload firmware artifacts
@@ -186,7 +190,7 @@ jobs:
           find ./temp -type f -exec cp -t ./firmware/firmware {} +
       - name: Add "release" to footer
         run: |
-          sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
+          #sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
       - name: Run PlatformIO
         run: platformio run -e ${{ matrix.variant }}-${{ matrix.language }}
       - name: Upload language firmware artifacts
@@ -228,7 +232,7 @@ jobs:
     steps:
     - name: Dispatch workflow in arendst/Tasmota-firmware
       run: |
-         curl -X POST https://api.github.com/repos/arendst/Tasmota-firmware/actions/workflows/fetch_deploy.yml/dispatches \
+         curl -X POST https://api.github.com/repos/mi-hol/Tasmota-firmware/actions/workflows/fetch_deploy.yml/dispatches \
          -H 'Accept: application/vnd.github.everest-preview+json' \
          -u ${{ secrets.API_TOKEN_GITHUB }} \
          --data '{"ref": "gh_actions"}'
