@@ -20,14 +20,14 @@ jobs:
       matrix:
         variant:
           - tasmota32-safeboot
-          - tasmota32solo1-safeboot
-          - tasmota32c2-safeboot
+          #- tasmota32solo1-safeboot
+          #- tasmota32c2-safeboot
           - tasmota32c3-safeboot
-          - tasmota32c3ser-safeboot
-          - tasmota32s2-safeboot
-          - tasmota32s2cdc-safeboot
-          - tasmota32s3-safeboot
-          - tasmota32s3ser-safeboot
+          #- tasmota32c3ser-safeboot
+          #- tasmota32s2-safeboot
+          #- tasmota32s2cdc-safeboot
+          #- tasmota32s3-safeboot
+          #- tasmota32s3ser-safeboot
           - tasmota32c6-safeboot
           - tasmota32c6ser-safeboot
     steps:
@@ -42,7 +42,7 @@ jobs:
           pip install -U platformio
       - name: Add "release" to footer
         run: |
-          sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
+          #sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
       - name: Run PlatformIO
         run: platformio run -e ${{ matrix.variant }}
       - name: Upload safeboot firmware artifacts
@@ -60,13 +60,13 @@ jobs:
           - tasmota
           - tasmota-4M
           - tasmota-minimal
-          - tasmota-display
-          - tasmota-ir
-          - tasmota-knx
-          - tasmota-lite
-          - tasmota-sensors
-          - tasmota-zbbridge
-          - tasmota-zigbee
+          #- tasmota-display
+          #- tasmota-ir
+          #- tasmota-knx
+          #- tasmota-lite
+          #- tasmota-sensors
+          #- tasmota-zbbridge
+          #- tasmota-zigbee
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -79,7 +79,7 @@ jobs:
           pip install -U platformio
       - name: Add "release" to footer
         run: |
-          sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
+          #sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
       - name: Run PlatformIO
         run: platformio run -e ${{ matrix.variant }}
       - name: Upload firmware artifacts
@@ -96,20 +96,20 @@ jobs:
       matrix:
         variant:
           - tasmota32
-          - tasmota32-zbbrdgpro
-          - tasmota32-webcam
-          - tasmota32-bluetooth
-          - tasmota32-nspanel
-          - tasmota32-display
-          - tasmota32-ir
-          - tasmota32-lvgl
-          - tasmota32c2
+          #- tasmota32-zbbrdgpro
+          #- tasmota32-webcam
+          #- tasmota32-bluetooth
+          #- tasmota32-nspanel
+          #- tasmota32-display
+          #- tasmota32-ir
+          #- tasmota32-lvgl
+          #- tasmota32c2
           - tasmota32c3
           - tasmota32c6
-          - tasmota32s2
-          - tasmota32s2cdc
-          - tasmota32s3
-          - tasmota32solo1
+          #- tasmota32s2
+          #- tasmota32s2cdc
+          #- tasmota32s3
+          #- tasmota32solo1
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -131,7 +131,7 @@ jobs:
           find ./temp -type f -exec cp -t ./firmware/firmware {} +
       - name: Add "release" to footer
         run: |
-          sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
+          #sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
       - name: Run PlatformIO
         run: platformio run -e ${{ matrix.variant }}
       - name: Upload firmware artifacts
@@ -147,7 +147,8 @@ jobs:
     strategy:
       matrix:
         variant: [ tasmota, tasmota32 ]
-        language: [ AD, AF, BG, BR, CN, CZ, DE, ES, FR, FY, GR, HE, HU, IT, KO, LT, NL, PL, PT, RO, RU, SE, SK, TR, TW, UK, VN ]
+        #language: [ AD, AF, BG, BR, CN, CZ, DE, ES, FR, FY, GR, HE, HU, IT, KO, LT, NL, PL, PT, RO, RU, SE, SK, TR, TW, UK, VN ]
+        language: [ AD, DE]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -169,7 +170,7 @@ jobs:
           find ./temp -type f -exec cp -t ./firmware/firmware {} +
       - name: Add "release" to footer
         run: |
-          sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
+          #sed -i -e "s/TASMOTA_SHA_SHORT/TASMOTA_SHA_SHORT release-/g" ./tasmota/include/tasmota_version.h
       - name: Run PlatformIO
         run: platformio run -e ${{ matrix.variant }}-${{ matrix.language }}
       - name: Upload language firmware artifacts
