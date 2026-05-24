@@ -20,6 +20,7 @@
 // Uncomment to pre-fill all charts with synthetic data at boot.
 //#define SML_CHART_DEMO
 
+#include "sml_chart_common.tc"
 #include "sml_chart_pv_common.tc"
 
 // ── Transient WebButton flags ──────────────────────────────────────────────
