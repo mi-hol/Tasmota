@@ -72,8 +72,16 @@
 // so a freshly flashed image already has it; if /tinyc_repos.cfg exists on the
 // filesystem it REPLACES this list (Hans, 2026-09-14: having to upload a file
 // after flashing defeats the purpose).
+//
+// The default offers BOTH repositories: ours and ottelo's SmartMeter/PV/Emulator programs. Ottelo's images define the
+// same two entries in their user_config_override.h, so a device that switches between his image and ours keeps the
+// same choice -- with one entry only the page shows no source drop-down, and mi-hol (gemu2015/Sonoff-Tasmota#131,
+// 17.10.2026) found the "Repo selection box" gone after the switch. The entry whose <base>/bytecode equals
+// TINYC_DEFAULT_REPO is preselected, so our default stays ours.
 #ifndef TINYC_REPO_LIST
-#define TINYC_REPO_LIST "TinyC (gemu2015)|https://raw.githubusercontent.com/gemu2015/Sonoff-Tasmota/universal/tasmota/tinyc"
+#define TINYC_REPO_LIST \
+  "TinyC Examples (gemu2015)|https://raw.githubusercontent.com/gemu2015/Sonoff-Tasmota/universal/tasmota/tinyc\n" \
+  "SmartMeter/PV/Emulator (ottelo)|https://raw.githubusercontent.com/ottelo9/tasmota-sml-script/main/tinyc"
 #endif
 
 // Cap for the list, whether compiled in or read from the file. Four entries of

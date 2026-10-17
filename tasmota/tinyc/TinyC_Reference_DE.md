@@ -6090,14 +6090,22 @@ Das Standard-Repository unter `https://raw.githubusercontent.com/gemu2015/Sonoff
 
 Ein Image kann mehrere Quellen anbieten. Die Liste ist **einkompiliert**, ein
 frisch geflashtes Geraet hat sie also schon und es muss nichts hochgeladen
-werden:
+werden. Seit 1.6.74 hat der Standard unser Repository **und** das von ottelo
+(`TINYC_REPO_LIST` in `xdrv_124_tinyc.ino`; seine Images tragen dieselben zwei
+Eintraege, ein Wechsel zwischen den Images behaelt also die Auswahl). Ein Bau kann
+sie ueberschreiben:
 
 ```c
 // user_config_override.h — ein Eintrag je Zeile, "Klarname|Basis-URL"
 #define TINYC_REPO_LIST \
-  "TinyC (gemu2015)|https://raw.githubusercontent.com/gemu2015/Sonoff-Tasmota/universal/tasmota/tinyc\n" \
-  "SML (ottelo)|https://raw.githubusercontent.com/ottelo9/tasmota-sml-script/main/tinyc"
+  "TinyC Examples (gemu2015)|https://raw.githubusercontent.com/gemu2015/Sonoff-Tasmota/universal/tasmota/tinyc\n" \
+  "SmartMeter/PV/Emulator (ottelo)|https://raw.githubusercontent.com/ottelo9/tasmota-sml-script/main/tinyc"
 ```
+
+Mit **einem** Eintrag zeigt die Seite gar kein Quellen-Klappmenue. Bis 1.6.73 war das
+der Standard, und ein Geraet, das von Ottelos Image kam, verlor beim Update das
+Klappmenue (und seine Programme); eine Datei `/tinyc_repos.cfg` mit den zwei Zeilen
+oben bringt es ohne Flashen zurueck.
 
 Liegt `/tinyc_repos.cfg` auf dem Dateisystem, **ersetzt** sie diese Liste --
 so laesst sich ein Geraet auch nach dem Flashen umstellen. Die `/tc`-Seite

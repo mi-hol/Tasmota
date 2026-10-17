@@ -6365,14 +6365,22 @@ The default repository at `https://raw.githubusercontent.com/gemu2015/Sonoff-Tas
 #### Choosing between several repositories
 
 A build can offer more than one source. The list is **compiled in**, so a
-freshly flashed image already has it and nothing has to be uploaded first:
+freshly flashed image already has it and nothing has to be uploaded first. Since
+1.6.74 the default has both our repository and ottelo's (`TINYC_REPO_LIST` in
+`xdrv_124_tinyc.ino`; his images carry the same two entries, so switching between
+the images keeps the choice). A build can override it:
 
 ```c
 // user_config_override.h — one entry per line, "Display name|base URL"
 #define TINYC_REPO_LIST \
-  "TinyC (gemu2015)|https://raw.githubusercontent.com/gemu2015/Sonoff-Tasmota/universal/tasmota/tinyc\n" \
-  "SML (ottelo)|https://raw.githubusercontent.com/ottelo9/tasmota-sml-script/main/tinyc"
+  "TinyC Examples (gemu2015)|https://raw.githubusercontent.com/gemu2015/Sonoff-Tasmota/universal/tasmota/tinyc\n" \
+  "SmartMeter/PV/Emulator (ottelo)|https://raw.githubusercontent.com/ottelo9/tasmota-sml-script/main/tinyc"
 ```
+
+With **one** entry the page shows no source drop-down at all. Up to 1.6.73 that was
+the default, and a device that came from ottelo's image lost the drop-down (and his
+programs) in the update; a file `/tinyc_repos.cfg` with the two lines above brings it
+back without flashing.
 
 If `/tinyc_repos.cfg` exists on the filesystem it **replaces** that list, so a
 device can be pointed somewhere else after flashing. The `/tc` page shows a
