@@ -6599,6 +6599,7 @@ Both display their sensor rows on the Tasmota main page simultaneously.
 | GPIO pins | 18 | 21–55 | not checked | `MAX_GPIO_PIN` from Tasmota's own template — **per chip**: classic ESP32 40, C2 21, C3 22, C5 29, C6 31, S2 47, S3 49, P4 55. A pin outside the range is silently ignored, not reported |
 | File handles | 4 | 4 | 8 | Simultaneously open files (`TC_MAX_FILE_HANDLES`) |
 | VM slots | 1 | 6 | 1 | Simultaneous programs (`TC_MAX_VMS`) |
+| Program file name | 32 | 64 | n/a | Longest path of a program in a slot (`TC_FILENAME_MAX`, counting the NUL): **31 / 63 characters including the leading `/` and the `.tcb`**, so a name of 26 / 58 characters. Up to 1.6.73 it was 32 on the ESP32 too, and a longer name was cut, lost its extension and made the persist file overwrite the program. A longer name is now refused at upload with a 400 |
 | Cross-VM share | n/a | 32 keys | n/a | Driver-global shared scalar/string table (`TC_SHARE_MAX`). ESP32 only — the whole table and its syscalls are compiled out when `TC_MAX_VMS` is 1 |
 
 **ESP32 PSRAM fallback (since v1.3.19):** `TC_MAX_PROGRAM` raised 64 KB → 128 KB. The bytecode buffer (`s->program`) and the constant data pool (`vm->const_data`) are allocated from internal DRAM first; on OOM they automatically spill to `heap_caps_malloc(MALLOC_CAP_SPIRAM)`. Small/normal scripts stay in fast static RAM; only edge-case 100+ KB programs spill to PSRAM. An `AddLog` INFO line is emitted when the PSRAM path is taken.

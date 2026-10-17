@@ -322,6 +322,15 @@ extern uint16_t tc_vm_stack_bytes;
 // subsides. Once per window we realloc the heap DOWN to the window's PEAK
 // heap_used + headroom: never below what the window actually used (so it can't
 // thrash against active polling), but it returns the peak once the load stops.
+// Longest file name a slot can carry, '/' and ".tcb" included, plus the terminating NUL. The name lives in four buffers
+// (slot, tinyc.cfg entry, upload, persist file) and every one must be this big: with 32 bytes a name of 27+ characters was
+// cut to 31, lost its extension, and the persist file ended up with the SAME path as the program -- the first save wrote
+// over the program ("Load failed: Invalid binary"; Andreas, 15.10.2026). ESP8266 keeps 32 to save RAM.
+#ifdef ESP32
+  #define TC_FILENAME_MAX 64
+#else
+  #define TC_FILENAME_MAX 32
+#endif
 #define TC_HEAP_MAINT_WINDOW    30    // seconds per measure/shrink window
 #define TC_HEAP_SHRINK_HEADROOM 64    // slots kept above the window peak
 #define TC_HEAP_SHRINK_GAP      256   // only shrink when >= this many slots (1 KB) would be freed
@@ -1776,7 +1785,7 @@ typedef struct {
   // 2 B/entry, not a per-slot name-copy.
   struct { uint16_t index; uint16_t count; uint16_t name_off; } persist[TC_MAX_PERSIST];
   uint8_t       persist_count;
-  char          persist_file[32];  // e.g. "/ecotracker.pvs" — derived from .tcb filename
+  char          persist_file[TC_FILENAME_MAX];  // e.g. "/ecotracker.pvs" — derived from .tcb filename
   // UDP globals table (V5: auto-update from UDP packets)
   // Dynamically allocated in tc_vm_load only when bytecode declares UDP globals
   struct TcUdpGlobalEntry {
@@ -1877,7 +1886,7 @@ struct TcSlot {
                                   //   (every script reload needs hardware
                                   //   re-init via BootInit). Set in
                                   //   tc_vm_load; cleared after dispatch.
-  char     filename[32];          // e.g. "/bresser.tcb"
+  char     filename[TC_FILENAME_MAX];  // e.g. "/bresser.tcb"
   char     cmd_prefix[17];       // registered command prefix, e.g. "MP3" — LIVE
                                   //   matcher field; cleared by TinyCStopVM teardown.
   char     cmd_prefix_saved[17];  // STICKY copy of the registered prefix. Set alongside
@@ -1950,7 +1959,7 @@ struct TINYC {
   TcSlot  *slots[TC_MAX_VMS];     // per-program VM slots (NULL = unused, malloc'd on demand)
   // Lightweight slot config — persists filename + autoexec without loading into RAM
   struct {
-    char filename[32];            // .tcb filename (empty = no file assigned)
+    char filename[TC_FILENAME_MAX];  // .tcb filename (empty = no file assigned)
     bool autoexec;                // auto-run on boot
     char cmd_prefix[17];          // DURABLE copy of the slot's registered command prefix
                                   //   (e.g. "BAT"). Learned from cmd_prefix_saved the first time
@@ -1970,7 +1979,7 @@ struct TINYC {
   uint32_t upload_alloc_size;       // size of upload_buf allocation (may be < TC_MAX_PROGRAM if client sent ?fsz=N)
   uint32_t upload_received;
   uint8_t  upload_slot;           // target slot for current upload
-  char     upload_filename[32];   // filename during upload (copied to slot on completion)
+  char     upload_filename[TC_FILENAME_MAX];   // filename during upload (copied to slot on completion)
   // File I/O state (File objects are stored separately as statics — see below)
   bool     file_used[TC_MAX_FILE_HANDLES];
   // UDP multicast (Scripter-compatible, 239.255.255.250:1999)
@@ -22174,13 +22183,16 @@ static void TinyCSetPersistFile(TcSlot *s, const char *tcb_path) {
     return;
   }
   strlcpy(pf, tcb_path, pfsz);
-  // Replace extension: find last '.' and replace with .pvs
-  char *dot = strrchr(pf, '.');
-  if (dot && (dot - pf) < (int)(pfsz - 4)) {
-    strcpy(dot, ".pvs");
-  } else {
-    strlcat(pf, ".pvs", pfsz);
-  }
+  // Replace the extension: the stem is everything before the last '.' AFTER the last '/', and it is cut so that
+  // ".pvs" always fits. The result therefore always ends in ".pvs" and can never be the program's own path -- before
+  // 1.6.74 a name that filled the buffer got no ".pvs" at all, the persist file WAS the program file, and the first
+  // saveVars() overwrote the program.
+  char *slash = strrchr(pf, '/');
+  char *dot = strrchr(slash ? slash : pf, '.');
+  size_t stem = dot ? (size_t)(dot - pf) : strlen(pf);
+  if (stem > pfsz - 5) stem = pfsz - 5;
+  pf[stem] = '\0';
+  strlcat(pf, ".pvs", pfsz);
 }
 
 // Helper: stop the VM in a specific slot

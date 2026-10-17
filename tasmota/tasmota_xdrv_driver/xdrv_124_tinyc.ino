@@ -787,6 +787,14 @@ static void TinyCLoadSettings(void) {
     if (slot >= TC_MAX_VMS) break;
 
     fname.trim();
+    if (fname.length() >= TC_FILENAME_MAX) {
+      // An entry from before the buffers were 64 bytes cannot exist (it was cut when it was written); anything
+      // else is a hand-edited file. A name that does not fit would be cut and no longer match its file.
+      AddLog(LOG_LEVEL_INFO, PSTR("TCC: Slot %d: file name too long (%d characters) — entry dropped"), slot, (int)fname.length());
+      cfg_stale = true;
+      slot++;
+      continue;
+    }
     if (fname.length() > 0) {
       // A slot whose file is gone keeps NOTHING. Deleting a .tcb (over /ufsd,
       // or after TinyCUnload) left the name standing in /tinyc.cfg, so the
@@ -2396,6 +2404,12 @@ static bool TinyCLoadFile(const char *path, uint8_t slot_num) {
   if (!Tinyc) return false;
   if (slot_num >= TC_MAX_VMS) return false;
 
+  // A path that does not fit the slot's name buffer would be cut in the slot and in /tinyc.cfg and then no longer
+  // match the file (and its persist file). Refuse it instead of loading under a wrong name.
+  if (strlen(path) >= TC_FILENAME_MAX) {
+    AddLog(LOG_LEVEL_ERROR, PSTR("TCC: Load %s refused: file name too long (at most %d characters)"), path, TC_FILENAME_MAX - 1);
+    return false;
+  }
   // Allocate slot if needed
   if (!Tinyc->slots[slot_num]) {
     Tinyc->slots[slot_num] = tc_slot_alloc();
@@ -2644,7 +2658,7 @@ static void HandleTinyCPage(void) {
         if (!fss[fi]) continue;
         File dir = fss[fi]->open("/", "r");
         if (!dir) continue;
-        char names[16][40];
+        char names[16][TC_FILENAME_MAX];   // as long as a slot name can be (was 40: a longer file was "removed" under a cut name, i.e. not at all)
         int count = 0;
         dir.rewindDirectory();
         while (count < 16) {
@@ -2656,7 +2670,7 @@ static void HandleTinyCPage(void) {
             char *lcp = strrchr(ep, '/');
             if (lcp) ep = lcp + 1;
             uint16_t nlen = strlen(ep);
-            if (nlen > 4 && strcasecmp(ep + nlen - 4, ".tcb") == 0) {
+            if (nlen > 4 && nlen + 1 < sizeof(names[0]) && strcasecmp(ep + nlen - 4, ".tcb") == 0) {
               snprintf(names[count], sizeof(names[0]), "/%s", ep);
               count++;
             }
@@ -2812,7 +2826,7 @@ static void HandleTinyCPage(void) {
           if (lcp) ep = lcp + 1;
           uint16_t nlen = strlen(ep);
           if (nlen > 4 && strcasecmp(ep + nlen - 4, ".tcb") == 0) {
-            char fpath[40];
+            char fpath[TC_FILENAME_MAX];
             snprintf(fpath, sizeof(fpath), "/%s", ep);
             // Plain name and info link out of the .tcb header, if the program
             // carries them (`// @name:` / `// @info:` in the .tc). Without them
@@ -3262,6 +3276,9 @@ static void HandleTinyCPage(void) {
   WSContentEnd();
 }
 
+// Set by HandleTinyCUpload when the file name is longer than a slot can carry; HandleTinyCUploadDone then says why.
+static bool tc_upload_name_error = false;
+
 static void HandleTinyCUploadDone(void) {
   if (!HttpCheckPriviledgedAccess()) { return; }
 
@@ -3279,6 +3296,13 @@ static void HandleTinyCUploadDone(void) {
     // authoritative signal for this request.
     TCSendCORS("POST, OPTIONS");
     if (Web.upload_error || !s || !s->loaded) {
+      if (tc_upload_name_error) {
+        char json[160];
+        snprintf_P(json, sizeof(json), PSTR("{\"ok\":false,\"error\":\"file name too long (at most %u characters including .tcb)\"}"),
+                   (unsigned)(TC_FILENAME_MAX - 2));
+        WSSendJSON(400, json);
+        return;
+      }
       WSSendJSON_P(400, PSTR("{\"ok\":false,\"error\":\"upload failed\"}"));
       return;
     }
@@ -3310,6 +3334,10 @@ static void HandleTinyCUploadDone(void) {
       "<fieldset><legend><b> Upload Result </b></legend>"
       "<p style='text-align:center;color:#f44'><b>&#x2718; Upload failed</b></p>"
       "</fieldset>"));
+    if (tc_upload_name_error) {
+      WSContentSend_P(PSTR("<p style='text-align:center'>File name too long: at most %d characters including .tcb.</p>"),
+                      (int)(TC_FILENAME_MAX - 2));
+    }
   }
   WSContentSend_P(HTTP_FORM_BUTTON, PSTR("tc"), PSTR("Back to TinyC"));
 
@@ -3882,6 +3910,18 @@ static void HandleTinyCUpload(void) {
     uint8_t slot_num = Tinyc->upload_slot;
 
     AddLog(LOG_LEVEL_INFO, PSTR("TCC: Upload start: %s (slot %d)"), upload.filename.c_str(), slot_num);
+
+    // A name that does not fit is REFUSED, before anything is touched (the slot keeps its program): cutting it
+    // dropped the extension, two long names with the same start landed in the same file, and the persist file
+    // could collide with the program. The client gets a clear 400 with the limit.
+    tc_upload_name_error = false;
+    if (strlen(upload.filename.c_str()) + 1 >= sizeof(Tinyc->upload_filename)) {
+      Web.upload_error = 1;
+      tc_upload_name_error = true;
+      AddLog(LOG_LEVEL_ERROR, PSTR("TCC: Upload refused: file name %s is too long (%u characters, at most %u including the .tcb)"),
+             upload.filename.c_str(), (unsigned)strlen(upload.filename.c_str()), (unsigned)(sizeof(Tinyc->upload_filename) - 2));
+      return;
+    }
 
     // ⚠️ Web.upload_error is a GLOBAL and nobody clears it for us. One failed
     // upload (a malloc that could not be served, an oversize file) therefore
