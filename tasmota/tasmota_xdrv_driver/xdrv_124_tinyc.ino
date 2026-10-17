@@ -2569,6 +2569,17 @@ static bool tc_tcb_meta(FS *fs, const char *path,
 }
 #endif  // USE_UFILESYS
 
+// The index file next to a data file: "<path without extension>.ind". The extension is looked for only behind the LAST
+// slash (a dot in a folder name, /sd/v1.2/log, made it "/sd/v1.ind"), and the ".ind" is appended with strlcat, never
+// strcat (a path without a dot and 124+ characters overflowed the 128-byte buffer). Andreas, 17.10.2026.
+static void tc_ind_path(const char *path, char *out, size_t osz) {
+  strlcpy(out, path, osz);
+  char *slash = strrchr(out, '/');
+  char *dot = strrchr(slash ? slash : out, '.');
+  if (dot) *dot = 0;
+  strlcat(out, ".ind", osz);
+}
+
 static void HandleTinyCPage(void) {
   if (!HttpCheckPriviledgedAccess()) { return; }
 
@@ -2666,6 +2677,13 @@ static void HandleTinyCPage(void) {
         if (!fss[fi]) continue;
         File dir = fss[fi]->open("/", "r");
         if (!dir) continue;
+        dir.close();
+        // At most 16 names are collected per pass (RAM), so repeat until a pass finds nothing: with more than 16
+        // programs the rest used to stay without a word (Andreas, 17.10.2026). The directory is reopened each pass
+        // because removing files while it is open can skip entries.
+        for (int pass = 0; pass < 64; pass++) {
+        dir = fss[fi]->open("/", "r");
+        if (!dir) break;
         char names[16][TC_FILENAME_MAX];   // as long as a slot name can be (was 40: a longer file was "removed" under a cut name, i.e. not at all)
         int count = 0;
         dir.rewindDirectory();
@@ -2686,10 +2704,13 @@ static void HandleTinyCPage(void) {
           entry.close();
         }
         dir.close();
+        int removed = 0;
         for (int i = 0; i < count; i++) {
-          fss[fi]->remove(names[i]);
+          if (fss[fi]->remove(names[i])) removed++;
         }
-        total += count;
+        total += removed;
+        if (removed == 0) break;        // nothing left (or nothing that can be removed: do not spin)
+        }
       }
       // The slot list must go with them. Deleting the files left every slot
       // still listed at the top of the page, because /tinyc.cfg was untouched:
@@ -4492,13 +4513,7 @@ static void HandleTinyCApi(void) {
       uint32_t seek_pos = 0;
       {
         char indpath[128];
-        strlcpy(indpath, pathbuf, sizeof(indpath));
-        char *dot = strrchr(indpath, '.');
-        if (dot) {
-          strcpy(dot, ".ind");
-        } else {
-          strcat(indpath, ".ind");
-        }
+        tc_ind_path(pathbuf, indpath, sizeof(indpath));
         File ind = ufsp->open(indpath, "r");
         if (ind) {
           // Skip index header line
@@ -6822,10 +6837,7 @@ static void tc_download_task(void *param) {
       uint32_t seek_pos = 0;
       {
         char indpath[128];
-        strlcpy(indpath, path, sizeof(indpath));
-        char *dot = strrchr(indpath, '.');
-        if (dot) strcpy(dot, ".ind");
-        else strcat(indpath, ".ind");
+        tc_ind_path(path, indpath, sizeof(indpath));
 
         File ind = fsp->open(indpath, "r");   // same FS as the data file
         if (ind) {
