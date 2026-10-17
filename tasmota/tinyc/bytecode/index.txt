@@ -214,4 +214,5 @@ webradio.tcb
 webui_demo.tcb
 webui_dynamic.tcb
 webui_watchdog.tcb
+worker_arrays_test.tcb
 zeitschaltuhr.tcb

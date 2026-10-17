@@ -1,0 +1,74 @@
+// @name: spawnTask worker with arrays (test)
+// ─────────────────────────────────────────────────────────────────────
+// worker_arrays_test.tc — a spawnTask worker that uses arrays > 16 elements, local and global.
+//
+// Until 1.6.73 such an array was a BOUNDS error in a worker (`TCC: BOUNDS heap[1] idx=0 size=0`,
+// once even a reset): the worker's VM had an empty private heap. Since the fix (ottelo, 12.10.2026)
+// the worker works on the primary's heap. This is the regression test; it needs ESP32 firmware
+// with the fix.
+//
+// Console (prefix WT):
+//   WTW   run Worker(): fills a local char[240], uses sprintf/strlen on it, writes a global array
+//   WTL   run Loop(): 150 x (fill a local char[200], delay 100 ms, check it is intact) = 15 s
+//   WT    status: {"WT":{"ok":1,"done":1,"len":239,"loops":150,"bad":0,...}}
+//
+// Expected: after WTW   ok=1 done=1 len=239;   after WTL (15 s)   loops=150 bad=0.
+// Also try: start Loop() and, while it runs, send commands, reload the page and stop/eject/reset
+// the slot (TinyCStop / the eject button): the device must stay up.
+// ─────────────────────────────────────────────────────────────────────
+
+int w_ok = 0;       // Worker(): 1 = all checks passed
+int w_done = 0;
+int w_len = -1;
+int w_loops = 0;    // Loop(): iterations done
+int w_bad = -1;     // Loop(): iterations whose buffer was damaged
+int w_sh = 0;       // Loop(): value of shared[1] seen after a delay
+int cmds = 0;
+char shared[300];   // global array, heap
+
+void Worker() {
+    char cfg[240];  // local array, heap
+    int k = 0;
+    while (k < 239) { cfg[k] = 'a' + (k % 26); k = k + 1; }
+    cfg[239] = 0;
+    w_len = strlen(cfg);
+    strcpy(shared, "from worker");
+    char t[8];
+    strcpy(t, "ab");
+    sprintf(cfg, "%s|%d", "run", 42);
+    if (w_len == 239 && strlen(cfg) == 6 && cfg[0] == 'r' && shared[0] == 'f') { w_ok = 1; }
+    w_done = 1;
+}
+
+void Loop() {
+    char buf[200];
+    int i = 0;
+    int bad = 0;
+    while (i < 150) {
+        int k = 0;
+        while (k < 199) { buf[k] = 'A' + ((k + i) % 26); k = k + 1; }
+        buf[199] = 0;
+        delay(100);
+        if (buf[0] != 'A' + (i % 26)) { bad = bad + 1; }
+        if (buf[198] != 'A' + ((198 + i) % 26)) { bad = bad + 1; }
+        w_sh = shared[1];
+        i = i + 1;
+        w_loops = i;
+    }
+    w_bad = bad;
+}
+
+void Command(char cmd[]) {
+    char r[160];
+    cmds = cmds + 1;
+    if (strcmp(cmd, "W") == 0) { spawnTask("Worker"); responseCmnd("worker"); return; }
+    if (strcmp(cmd, "L") == 0) { w_loops = 0; w_bad = -1; spawnTask("Loop"); responseCmnd("loop"); return; }
+    sprintf(r, "{\"WT\":{\"ok\":%d,\"done\":%d,\"len\":%d,\"loops\":%d,\"bad\":%d,\"sh\":%d,\"cmds\":%d}}", w_ok, w_done, w_len, w_loops, w_bad, w_sh, cmds);
+    responseCmnd(r);
+}
+
+int main() {
+    addCommand("WT");
+    strcpy(shared, "main sets this");
+    return 0;
+}
