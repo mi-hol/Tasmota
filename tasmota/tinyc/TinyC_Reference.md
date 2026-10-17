@@ -6408,7 +6408,7 @@ the old file behaves exactly as it always did.
 for a different opcode set does not crash — it computes the wrong thing. The
 version marker that guards this belongs in the repository's `index.json`.
 
-### Plain names and info links (`// @name:` / `// @info:`)
+### Plain names, info links and versions (`// @name:` / `// @info:` / `// @version:`)
 
 Both program lists on the `/tc` page show bare filenames unless a program says
 otherwise. Two comment lines at the top of the `.tc` fix that:
@@ -6416,11 +6416,21 @@ otherwise. Two comment lines at the top of the `.tc` fix that:
 ```c
 // @name: SML Chart + Marstek CT002
 // @info: https://ottelo9.github.io/tasmota-sml-script/ct002/
+// @version: 20261017_1430
 ```
 
-The compiler puts both into the `.tcb` header, and the page then shows
-`SML Chart + Marstek CT002 (sml_chart_ct002)` with an **i** button next to
-the list that opens the link. The button follows the selection and dims when
+The compiler puts them into the `.tcb` header, and the page then shows
+`SML Chart + Marstek CT002` (name only; the file name is the tooltip of a slot row) with an **i** button
+next to the list that opens the link.
+
+`@version` is optional: `YYYYMMDD_HHMM`, date **and** time, set by hand whenever the program changes (not
+the build time, or every rebuild would flag every program). A slot row shows it behind the name as
+`17.10.26 14:30`. When the repository's `index.json` lists the same file with a **newer** `"version"`, the row
+gets a `🔄` button that asks and then does "Download & Load" into the same slot (settings stay, the `.pvs` is
+name-keyed). "Newer" is a plain string compare, so a test build that is newer than the repository is never
+offered a downgrade; if one of the two versions is not in that form (or the slot has none) it is "different"
+instead. No `"version"` in the repository: no button. `compile_examples.mjs` writes `"version"` into
+`index.json` for programs that have the line. The button follows the selection and dims when
 the chosen program carries no link.
 
 Everything here is optional. A program without these lines is listed exactly as

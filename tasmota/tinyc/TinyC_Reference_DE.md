@@ -6134,7 +6134,7 @@ dieselben Dateien. Ein Geraet mit der alten Datei verhaelt sich unveraendert.
 einen anderen Opcode-Satz stuerzt nicht ab -- sie rechnet falsch. Die
 Versionsmarke, die das abfaengt, gehoert in die `index.json` des Repositories.
 
-### Klarnamen und Info-Links (`// @name:` / `// @info:`)
+### Klarnamen, Info-Links und Versionen (`// @name:` / `// @info:` / `// @version:`)
 
 Beide Programmlisten auf der `/tc`-Seite zeigen nackte Dateinamen, solange ein
 Programm nichts anderes sagt. Zwei Kommentarzeilen am Anfang der `.tc` aendern
@@ -6143,12 +6143,23 @@ das:
 ```c
 // @name: SML Chart + Marstek CT002
 // @info: https://ottelo9.github.io/tasmota-sml-script/ct002/
+// @version: 20261017_1430
 ```
 
-Der Compiler legt beides in den `.tcb`-Kopf, und die Seite zeigt dann
-`SML Chart + Marstek CT002 (sml_chart_ct002)` samt einem **i**-Knopf neben
-der Liste, der den Link oeffnet. Der Knopf folgt der Auswahl und blendet ab,
+Der Compiler legt sie in den `.tcb`-Kopf, und die Seite zeigt dann
+`SML Chart + Marstek CT002` (nur der Name; der Dateiname steht als Tooltip der Slot-Zeile) samt einem
+**i**-Knopf neben der Liste, der den Link oeffnet. Der Knopf folgt der Auswahl und blendet ab,
 wenn das gewaehlte Programm keinen Link traegt.
+
+`@version` ist optional: `YYYYMMDD_HHMM`, Datum **und** Uhrzeit, von Hand gesetzt, wenn sich das Programm
+aendert (nicht die Bauzeit, sonst wuerde jeder Neubau jedes Programm als geaendert melden). Die Slot-Zeile
+zeigt sie hinter dem Namen als `17.10.26 14:30`. Fuehrt der `index.json` des Repositorys dieselbe Datei mit
+einer **neueren** `"version"`, bekommt die Zeile einen `🔄`-Knopf, der nachfragt und dann
+„Download & Load" in denselben Slot macht (die Einstellungen bleiben, die `.pvs` ist namensbasiert).
+„Neuer" ist ein reiner Textvergleich, ein Testbau, der neuer ist als das Repository, bekommt also nie ein
+Downgrade angeboten; steht eine der beiden Versionen nicht in dieser Form da (oder hat der Slot keine),
+heisst es „anders". Keine `"version"` im Repository: kein Knopf. `compile_examples.mjs` schreibt `"version"`
+in den `index.json` fuer Programme mit der Zeile.
 
 Alles daran ist optional. Ein Programm ohne diese Zeilen steht genau so in der
 Liste wie bisher, und `build.html` schreibt `index.json` **neben** `index.txt`
