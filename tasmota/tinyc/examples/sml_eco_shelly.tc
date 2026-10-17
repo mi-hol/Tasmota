@@ -1,5 +1,6 @@
 // @name: SML + EcoTracker / Shelly
 // @info: https://ottelo9.github.io/tasmota-sml-script/eco_shelly/
+// @order: 22
 // sml_eco_shelly.tc — SML meter + EcoTracker / Shelly Pro 3EM emulator,
 // no charts. Feeds a PV battery (Marstek, Jackery, NOAH, Hoymiles, ...) for
 // zero feed-in. For the charts variant use sml_chart_eco_shelly.tc.
@@ -12,7 +13,7 @@
 #include "pv_switch_common.tc"
 #include "eco_shelly_common.tc"
 
-char sml_vers[] = "07.10.2026";
+char sml_vers[] = "12.10.2026";
 
 // ─── Settings ──────────────────────────────────────────────────────────────
 persist int sml_sndpwr;      // 1 = publish power2 via MQTT
@@ -115,6 +116,7 @@ void WebUI() {
     webSend("<div class='n'>HTTP: <a href='/pwr' target='_blank'>/pwr</a> &nbsp; <a href='/pwr?v=all' target='_blank'>/pwr?v=all</a> &nbsp; <a href='/pwr?v=sml[1]' target='_blank'>/pwr?v=sml[1]</a></div>");
     mbPanel();
 
+    webSend("<div><b>FTP-Backup</b>"); uiI("sml/#ftp"); webSend("</div>");
     webSend("<hr>");
     uiSaveButton();
     if (ui_de) webButton(do_reset, "SML Neustart|OK");

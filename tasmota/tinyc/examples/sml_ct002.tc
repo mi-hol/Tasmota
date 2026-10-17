@@ -1,5 +1,6 @@
 // @name: SML + Marstek CT002
 // @info: https://ottelo9.github.io/tasmota-sml-script/ct002/
+// @order: 23
 // sml_ct002.tc — SML meter + Marstek CT002/CT003 emulator, no charts.
 // Meter setup and telemetry as in sml_simple.tc, plus the CT emulator on
 // UDP 12345. For the charts variant use sml_chart_ct002.tc.
@@ -13,7 +14,7 @@
 #include "pv_switch_common.tc"
 #include "ct002_common.tc"
 
-char sml_vers[] = "07.10.2026";
+char sml_vers[] = "14.10.2026";
 
 // ─── Settings ──────────────────────────────────────────────────────────────
 persist int  sml_sndpwr;         // 1 = publish power2 via MQTT
@@ -127,6 +128,7 @@ void WebUI() {
     webSend("<div class='n'>HTTP: <a href='/pwr' target='_blank'>/pwr</a> &nbsp; <a href='/pwr?v=all' target='_blank'>/pwr?v=all</a> &nbsp; <a href='/pwr?v=sml[1]' target='_blank'>/pwr?v=sml[1]</a></div>");
     mbPanel();
 
+    webSend("<div><b>FTP-Backup</b>"); uiI("sml/#ftp"); webSend("</div>");
     webSend("<hr>");
     uiSaveButton();
     if (ui_de) webButton(do_reset, "SML Neustart|OK");

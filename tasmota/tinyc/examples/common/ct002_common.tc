@@ -37,7 +37,7 @@ persist int  ct_tweak;          // 1 = active control (was: regulator shaping)
 persist int  ct_trim;           // steady-import trim [W], 0 = off
 persist int  ct_pace;           // ramp step per cycle [W], 0 = off
 persist int  ct_mindc;          // minimum reported import [W], 0 = off
-persist int  ct_maxdc;          // discharge limit per battery [W], 0 = off
+persist int  ct_maxdc;          // discharge limit per battery [W], 0 = off, < 0 = charge at least
 persist int  ct_fair;           // 1 = split the load across batteries
 // Balance gain, rotation interval and the efficiency threshold used to be
 // three more settings. They are constants now, at AstraMeter's field-tested
@@ -121,6 +121,8 @@ int   ct_starg[CT_NSLOT];           // last target handed to this battery
 float ct_sfade[CT_NSLOT];           // 1..0 while fading out after a handoff
 int   ct_sdc[CT_NSLOT];             // 1 = B2500 family: DC only, 80 W start floor
 int   ct_sinsp[CT_NSLOT];           // 1 = seen in phase inspection, not yet back
+int   ct_ssent[CT_NSLOT];           // value it was last told: own phase field (A/B/C) or total
+byte  ct_ph[4];                     // phase letter for the SENSOR JSON
 int   ct_rotms;                     // millis() of the last rotation
 int   ct_rotoff;                    // rotation offset into the slot table
 float ct_dem;                       // smoothed demand, for the battery count
@@ -130,6 +132,8 @@ int  ct_pa; int ct_pb; int ct_pc; int ct_ptot;   // grid power reported to the b
 int  ct_ra; int ct_rb; int ct_rc; int ct_rtot;   // the same, raw - for inspection mode
 int  ct_reset_req;                 // 1 = an inspection ended, re-seed the regulator
 int  ct_idx;                       // response index 0..255, wraps
+int  ct_iprev[8];                  // values behind ct_idx, see ctIdx()
+int  ct_ims;                       // millis() of the last ct_idx step
 
 // Filled by ctAgg(), read by the response builder.
 int  ct_nbA; int ct_nbB; int ct_nbC; int ct_nbD; int ct_live;
@@ -261,6 +265,7 @@ int ctAlloc(byte macbuf[]) {
             ct_siv[i]    = 1000;
             ct_ssat[i]   = 0.0;             // not the previous battery's score
             ct_sinsp[i]  = 0;
+            ct_ssent[i]  = 0;
             ct_slast[i]  = millis();
             strcpy(ct_smac[i], macbuf);
             addLog("CT: +%d %s", i, macbuf);
@@ -572,7 +577,7 @@ void ctBuild(byte btype[], byte bmac[], byte reqctmac[]) {
             // response is unicast - cap the total for every battery. The two
             // foreign phase fields stay untouched: forced negative they would
             // read as export and could ask for charge.
-            if (ct_maxdc > 0) {
+            if (ct_maxdc != 0) {
                 int lim = ct_maxdc - ct_spwr[ct_slot];
                 if (ct_sph[ct_slot] == 1 && va > lim) va = lim;
                 if (ct_sph[ct_slot] == 2 && vb > lim) vb = lim;
@@ -582,6 +587,14 @@ void ctBuild(byte btype[], byte bmac[], byte reqctmac[]) {
                 if (ct_starg[ct_slot] > lim) ct_starg[ct_slot] = lim;
             }
         }
+    }
+    if (ct_slot >= 0) {
+        // For the SENSOR JSON: the field this battery acts on.
+        int sv = vd;
+        if (ct_sph[ct_slot] == 1) sv = va;
+        if (ct_sph[ct_slot] == 2) sv = vb;
+        if (ct_sph[ct_slot] == 3) sv = vc;
+        ct_ssent[ct_slot] = sv;
     }
     sprintfAppend(ct_innb, "|%d|%d|%d|%d", va, vb, vc, vd);                  // 5..8
     sprintfAppend(ct_innb, "|%d|%d|%d|%d", ct_nbA, ct_nbB, ct_nbC, ct_nbD);        // 9..12
@@ -673,7 +686,6 @@ void ctHandle(int n) {
         ct_spart[idx] = 1;                        // absent field means "participating"
     }
 
-    ct_idx = (ct_idx + 1) & 255;
     ct_slot = idx;
     ctBuild(ct_qbtype, ct_qbmac, ct_qmac);
     udp(2, ct_txb);                                // unicast back to the sender
@@ -948,6 +960,29 @@ void ctPower() {
     }
     ct_rtot = (int)smlGet(1);
     ct_ptot = ctCtrl(smlGet(1), 3);    // the saldierend total — phase D reads this
+    ctIdx();
+}
+
+// info_idx steps only when the values change. A battery polls every ~0.6 s,
+// the meter sends every 1-2 s: a repeat under the same index tells it "already
+// seen" instead of being acted on twice (next145, Scripter V1.2e). At least
+// every 10 s, so a steady meter never looks frozen.
+void ctIdx() {
+    int ch = 0;
+    if (ct_iprev[0] != ct_pa)   ch = 1;
+    if (ct_iprev[1] != ct_pb)   ch = 1;
+    if (ct_iprev[2] != ct_pc)   ch = 1;
+    if (ct_iprev[3] != ct_ptot) ch = 1;
+    if (ct_iprev[4] != ct_ra)   ch = 1;
+    if (ct_iprev[5] != ct_rb)   ch = 1;
+    if (ct_iprev[6] != ct_rc)   ch = 1;
+    if (ct_iprev[7] != ct_rtot) ch = 1;
+    if (millis() - ct_ims > 10000) ch = 1;
+    if (ch == 0) return;
+    ct_iprev[0] = ct_pa; ct_iprev[1] = ct_pb; ct_iprev[2] = ct_pc; ct_iprev[3] = ct_ptot;
+    ct_iprev[4] = ct_ra; ct_iprev[5] = ct_rb; ct_iprev[6] = ct_rc; ct_iprev[7] = ct_rtot;
+    ct_idx = (ct_idx + 1) & 255;
+    ct_ims = millis();
 }
 
 // ─── Marstek cloud registration (HTTPS via httpGet + md5) ──────────────────
@@ -1264,7 +1299,7 @@ void ctHaTick() {
     if (ct_ha_con == 0) { ct_ha_con = 1; ct_ha_step = 0; }
     if (ha_again == 1) { ha_again = 0; ct_ha_step = 0; }
     if (ct_ha_step == 0) { haPrepare(); haNumber("offset", "CT002 Offset", "CTOffset", -2000, 2000); ct_ha_step = 1; return; }
-    if (ct_ha_step == 1) { haNumber("limit", "CT002 Max DC", "CTLimit", 0, 5000); ct_ha_step = 2; return; }
+    if (ct_ha_step == 1) { haNumber("limit", "CT002 Max DC", "CTLimit", -5000, 5000); ct_ha_step = 2; return; }
     if (ct_ha_step == 2) { haState("offset", ct_offset); ct_ha_off = ct_offset; ct_ha_step = 3; return; }
     if (ct_ha_step == 3) { haState("limit", ct_maxdc); ct_ha_lim = ct_maxdc; ct_ha_step = 4; return; }
     if (ct_ha_off != ct_offset) { haState("offset", ct_offset); ct_ha_off = ct_offset; return; }
@@ -1386,11 +1421,11 @@ void ctRows() {
     if (ui_de) {
         sprintf(ct_buf, "{s}Akkus{m}%d{e}", live);            webSend(ct_buf);
         sprintf(ct_buf, "{s}CT meldet{m}%d W{e}", ct_ptot);   webSend(ct_buf);
-        if (ct_maxdc > 0) { sprintf(ct_buf, "{s}Max DC{m}%d W{e}", ct_maxdc); webSend(ct_buf); }
+        if (ct_maxdc != 0) { sprintf(ct_buf, "{s}Max DC{m}%d W{e}", ct_maxdc); webSend(ct_buf); }
     } else {
         sprintf(ct_buf, "{s}Batteries{m}%d{e}", live);        webSend(ct_buf);
         sprintf(ct_buf, "{s}CT sees{m}%d W{e}", ct_ptot);     webSend(ct_buf);
-        if (ct_maxdc > 0) { sprintf(ct_buf, "{s}Max DC{m}%d W{e}", ct_maxdc); webSend(ct_buf); }
+        if (ct_maxdc != 0) { sprintf(ct_buf, "{s}Max DC{m}%d W{e}", ct_maxdc); webSend(ct_buf); }
     }
 }
 
@@ -1433,7 +1468,7 @@ void ctPanel() {
     if (ui_de) webNumber(ct_e_pace, 0, 300, "Schritt [W]");
     else       webNumber(ct_e_pace, 0, 300, "Step [W]");
     webNumber(ct_e_mindc, 0, 200, "Min DC [W]");
-    webNumber(ct_e_maxdc, 0, 5000, "Max DC [W]");
+    webNumber(ct_e_maxdc, -5000, 5000, "Max DC [W]");
     ctLive(ct_maxdc);
 
     uiHead("&#x2696;&#xFE0F;", "Several batteries", "Mehrere Akkus", "ct002/#multi");
@@ -1484,12 +1519,33 @@ void ctJson() {
     for (i = 0; i < CT_NSLOT; i = i + 1) {
         if (ct_sused[i] == 1) live = live + 1;
     }
-    // "Power", not "Total": Home Assistant's Tasmota integration maps key
-    // names, and "Total" is its energy key - the watts showed up as kWh.
+    // Every watt value sits under the key "Power": Home Assistant's Tasmota
+    // integration gives a unit only to known keys (Power, ActivePower,
+    // PowerTotal - "Total" is its energy key, the watts showed up as kWh).
+    // So "L1":{"Power":90} instead of "L1":90 - HA names it "CT002 L1 Power".
     sprintf(ct_buf, ",\"CT002\":{\"Power\":%d", ct_ptot);
-    sprintfAppend(ct_buf, ",\"L1\":%d,\"L2\":%d,\"L3\":%d", ct_pa, ct_pb, ct_pc);
-    sprintfAppend(ct_buf, ",\"Slaves\":%d,\"Offset\":%d", live, ct_offset);
-    sprintfAppend(ct_buf, ",\"Limit\":%d}", ct_maxdc);
+    sprintfAppend(ct_buf, ",\"L1\":{\"Power\":%d},\"L2\":{\"Power\":%d}", ct_pa, ct_pb);
+    sprintfAppend(ct_buf, ",\"L3\":{\"Power\":%d},\"Slaves\":%d", ct_pc, live);
+    sprintfAppend(ct_buf, ",\"Offset\":{\"Power\":%d},\"Limit\":{\"Power\":%d}", ct_offset, ct_maxdc);
+    responseAppend(ct_buf);
+    // Per battery "Bat1":{"MAC":..,"Phase":"A","Power":300} plus "Bat1Target":{"Power":-120}:
+    // Power = what it reports delivering (+ = discharge), Target = what it was
+    // last told. Target sits beside Bat1, not inside: the integration resolves
+    // only two levels below CT002 and showed {'Power': 90} as text.
+    // Numbered by slot, so a battery keeps its number while it stays.
+    for (i = 0; i < CT_NSLOT; i = i + 1) {
+        if (ct_sused[i] == 1) {
+            strcpy(ct_ph, "0");
+            if (ct_sph[i] == 1) strcpy(ct_ph, "A");
+            if (ct_sph[i] == 2) strcpy(ct_ph, "B");
+            if (ct_sph[i] == 3) strcpy(ct_ph, "C");
+            if (ct_sph[i] == 4) strcpy(ct_ph, "D");
+            sprintf(ct_buf, ",\"Bat%d\":{\"MAC\":\"%s\",\"Phase\":\"%s\"", i + 1, ct_smac[i], ct_ph);
+            sprintfAppend(ct_buf, ",\"Power\":%d},\"Bat%dTarget\":{\"Power\":%d}", ct_spwr[i], i + 1, ct_ssent[i]);
+            responseAppend(ct_buf);
+        }
+    }
+    strcpy(ct_buf, "}");
     responseAppend(ct_buf);
 }
 
@@ -1665,13 +1721,11 @@ int ctCmd(char cmd[]) {
         sprintf(ct_buf, "{\"CTOffset\":%d}", ct_offset);
         responseCmnd(ct_buf);
     } else if (strcmp(cmd, "LIMIT") == 0 || strStartsWith(cmd, "LIMIT ") == 1) {
-        // Maximum discharge per battery, 0 = off. RAM only, like CTOffset;
-        // the field on the page is the saved one.
+        // Maximum output per battery, 0 = off, negative = charge at least
+        // that much. RAM only, like CTOffset; the field on the page is the saved one.
         if (strlen(cmd) > 6) {
             strSub(ct_buf, cmd, 6, 0);
-            int v = atoi(ct_buf);
-            if (v < 0) v = 0;
-            ct_maxdc = v;
+            ct_maxdc = atoi(ct_buf);
         }
         sprintf(ct_buf, "{\"CTLimit\":%d}", ct_maxdc);
         responseCmnd(ct_buf);

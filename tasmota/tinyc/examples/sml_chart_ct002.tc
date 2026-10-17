@@ -1,5 +1,6 @@
 // @name: SML Chart + Marstek CT002
 // @info: https://ottelo9.github.io/tasmota-sml-script/ct002/
+// @order: 13
 // sml_chart_ct002.tc — sml_chart_pv + Marstek CT002/CT003 emulator.
 // Charts, tables and PV tracking as in sml_chart_pv.tc, plus the CT
 // emulator on UDP 12345. Without charts use sml_ct002.tc.
@@ -13,7 +14,7 @@
 #include "pv_switch_common.tc"
 #include "ct002_common.tc"
 
-char sml_vers[] = "07.10.2026";
+char sml_vers[] = "14.10.2026";
 
 // ─── Settings ──────────────────────────────────────────────────────────────
 
@@ -202,6 +203,7 @@ void WebUI() {
 
     sml_chart_options_panel();
     sml_chart_data_panel(varIdx(do_base), varIdx(do_power), varIdx(do_bars));
+    webSend("<div><b>FTP-Backup</b>"); uiI("sml/#ftp"); webSend("</div>");
     webSend("<hr>");
     uiSaveButton();
     if (ui_de) webButton(do_reset, "SML Neustart|OK");
