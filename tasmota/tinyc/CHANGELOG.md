@@ -56,6 +56,10 @@ with total size and `abi_rev`) arrived in 1.6.35; v2–v5 files still load.
 
 ---
 
+## 1.6.74 — unreleased
+
+- ⚠️ **A `spawnTask` worker can use arrays again (ESP32).** Every array > 16 elements — locals included — lives in the slot's heap, but the worker VM had an empty private heap of its own, so any such array was a `BOUNDS heap[n] idx=0 size=0` error there (once even a reset), and no string longer than 16 characters could be handled. The worker now works on the **primary's heap** (`TcVM.heap_shared` / `heap_peer`; the primary refreshes the worker's view when its heap grows; the worker never allocates). Found and fixed by ottelo (12.10.2026, an FTP upload in a worker). Tried on an ESP32-S3 (`examples/worker_arrays_test.tc`): a local `char[240]`, a 15 s worker with `delay()` next to commands and web renders, 30 runs in a row, stop / eject / reload / reset with a worker running. A worker and a callback that use the same array share the buffer. Before this fix: use `TaskLoop()` for jobs that need buffers.
+
 ## 1.6.73 — 2026-10-08
 
 - ⚠️ **Updating from official Tasmota (or any firmware with another settings ID) resets the settings, Wi-Fi included — make a backup first (`Backup Configuration`).** Official Tasmota uses `CFG_HOLDER` 4617, our builds 5002. The device then starts with default settings and, without Wi-Fi, opens the access point `tasmota-XXXXXX-NNNN` (open, `http://192.168.4.1`): enter the Wi-Fi again. Until 1.6.72 such a device kept loading its old `/.settings.lkg` file on every boot — Wi-Fi survived, but no changed setting did (Rolf, 05.10.2026); the last-known-good copy is now only used when it carries the compiled holder.
