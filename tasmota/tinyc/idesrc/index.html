@@ -1383,9 +1383,10 @@ int main() {
                 // *_diag, *selftest*, *smoke*) so the dropdown stays a real example list.
                 const skip = /^(test_|bug)|(_diag|selftest|smoke)/i;
                 // Same label as the Repository box on the device's /tc page (gemu2015/Sonoff-Tasmota#128):
-                // "Plain name (file)" from `// @name:` via bytecode/index.json, the bare file name where
-                // there is none, and the list sorted by THAT label — not by file name, which made the
-                // alphabet look random as soon as a name started with a different letter.
+                // the plain name from `// @name:` via bytecode/index.json (ottelo's carry the date, "SML Chart
+                // [12.10.26]"; 17.10.2026: name only, no "(file)"), the bare file name where there is none, and
+                // the list sorted by THAT label — not by file name, which made the alphabet look random as soon
+                // as a name started with a different letter.
                 const names = {};
                 try {
                     const bdir = REPO_EX_DIR.replace(/examples$/, 'bytecode');
@@ -1399,7 +1400,7 @@ int main() {
                 } catch (e) { /* offline or no index: the file names still work */ }
                 const labelOf = f => {
                     const b = f.name.replace(/\.tc$/, '');
-                    return names[b] ? names[b] + ' (' + b + ')' : b;
+                    return names[b] || b;
                 };
                 const tc = files
                     .filter(f => f.type === 'file' && f.name.endsWith('.tc') && !skip.test(f.name))

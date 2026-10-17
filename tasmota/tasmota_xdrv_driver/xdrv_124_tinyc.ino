@@ -3032,15 +3032,16 @@ static void HandleTinyCPage(void) {
             // build.html keeps writing), new firmware against an old repo falls
             // back here. Entries are {file,name,info}; anything missing degrades
             // to exactly the old behaviour, the bare filename.
-            // ⚠️ GLEICHES ETIKETT WIE DIE IDE (gemu2015/Sonoff-Tasmota#128, mi-hol): „Name (datei)" OHNE
-            // „.tcb", und die Liste nach DIESEM Etikett sortiert — nicht nach Dateiname, sonst steht
-            // „Etekcity ESF37 Scale" scheinbar zufaellig zwischen den e-Dateien. Die IDE-Liste
-            // „Repo Examples" bildet dasselbe Etikett aus index.json.
+            // ⚠️ GLEICHES ETIKETT WIE DIE IDE (gemu2015/Sonoff-Tasmota#128, mi-hol): nur der NAME (seit 17.10.2026,
+            // Absprache mit ottelo: der Name sagt, was es ist, der Dateiname dahinter ist ueberfluessig; die Version
+            // steht in der Slot-Zeile; ohne Namen der Dateiname ohne „.tcb"), und die Liste nach DIESEM Etikett
+            // sortiert — nicht nach Dateiname, sonst steht „Etekcity ESF37 Scale" scheinbar zufaellig zwischen den
+            // e-Dateien. Die IDE-Liste „Repo Examples" bildet dasselbe Etikett aus index.json.
             "function tcLb(e){var n=e.name||e.n||'',f=e.file||e.f||'';"
-            "if(f.slice(-4)=='.tcb')f=f.slice(0,-4);return n?n+' ('+f+')':f}"
+            "if(f.slice(-4)=='.tcb')f=f.slice(0,-4);return n?n:f}"
             "function tcOpt(s,f,n,u){var o=document.createElement('option'),"
             "b=f.slice(-4)=='.tcb'?f.slice(0,-4):f;"
-            "o.value=f;o.textContent=n?n+' ('+b+')':b;if(u)o.dataset.u=u;s.appendChild(o)}"
+            "o.value=f;o.textContent=n?n:b;if(u)o.dataset.u=u;s.appendChild(o)}"
             "function tcrU(){var s=document.getElementById('tcrf');"
             "return s&&s.selectedIndex>=0?(s.options[s.selectedIndex].dataset.u||''):''}"
             "function tcrI(){var u=tcrU();if(u)window.open(u,'_blank','noopener')}"
