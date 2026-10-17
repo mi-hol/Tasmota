@@ -3046,9 +3046,15 @@ static void HandleTinyCPage(void) {
             "fetch(tcB()+'/index.json',{cache:f?'reload':'default'}).then(function(r){"
             "if(!r.ok)throw r.status;return r.json()}).then(function(j){"
             "var ls=(j&&j.programs)||j;if(!ls||!ls.length)throw 'empty';"
-            "ls=ls.slice().sort(function(a,b){return tcLb(a).localeCompare(tcLb(b),undefined,{sensitivity:'base'})});"
+            // "ordered":true in index.json keeps the repository's OWN order (ottelo, 12.10.2026: his list
+            // follows `// @order: N`); {"sep":1} is a disabled separator line. Without "ordered" the list
+            // is sorted by its label as before and the separators are dropped (they have no label).
+            "if(!j.ordered)ls=ls.filter(function(e){return !e.sep}).sort(function(a,b){"
+            "return tcLb(a).localeCompare(tcLb(b),undefined,{sensitivity:'base'})});"
             "s.innerHTML='';"
-            "ls.forEach(function(e){var u=e.info||'';"
+            "ls.forEach(function(e){if(e.sep){var q=document.createElement('option');"
+            "q.disabled=1;q.textContent=Array(21).join('\\u2500');s.appendChild(q);return}"
+            "var u=e.info||'';"
             "if(u&&u.slice(0,7)!='http://'&&u.slice(0,8)!='https://')u='';"
             "tcOpt(s,e.file||e.f||'',e.name||e.n||'',u)});tcrL()})"
             ".catch(function(){return tcTxt(s,f).then(tcrL)}).catch(function(e){"

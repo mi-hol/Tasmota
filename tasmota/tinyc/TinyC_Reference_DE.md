@@ -6138,7 +6138,7 @@ das:
 ```
 
 Der Compiler legt beides in den `.tcb`-Kopf, und die Seite zeigt dann
-`SML Chart + Marstek CT002 (sml_chart_ct002.tcb)` samt einem **i**-Knopf neben
+`SML Chart + Marstek CT002 (sml_chart_ct002)` samt einem **i**-Knopf neben
 der Liste, der den Link oeffnet. Der Knopf folgt der Auswahl und blendet ab,
 wenn das gewaehlte Programm keinen Link traegt.
 
@@ -6154,6 +6154,16 @@ Repository laufen damit beide weiter.
 {"programs":[{"file":"blink.tcb","name":"Blink"},
              {"file":"sml_chart_ct002.tcb","name":"SML Chart + Marstek CT002",
               "info":"https://ottelo9.github.io/tasmota-sml-script/ct002/"}]}
+```
+
+Zwei optionale Merkmale fuer ein Repository mit EIGENER Reihenfolge (ottelo, 12.10.2026): `"ordered":true`
+auf oberster Ebene behaelt die Reihenfolge von `programs` bei, statt die Liste nach ihrem Etikett zu
+sortieren, und ein Eintrag `{"sep":1}` wird zu einer gesperrten Trennzeile. Ohne `"ordered"` wird wie
+bisher sortiert, Trennzeilen fallen dann weg.
+
+```json
+{"ordered":true,"programs":[{"file":"sml_simple.tcb","name":"SML Simple"},{"sep":1},
+                            {"file":"sml_chart.tcb","name":"SML Chart"}]}
 ```
 
 Anmerkungen:

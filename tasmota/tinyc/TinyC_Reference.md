@@ -6411,7 +6411,7 @@ otherwise. Two comment lines at the top of the `.tc` fix that:
 ```
 
 The compiler puts both into the `.tcb` header, and the page then shows
-`SML Chart + Marstek CT002 (sml_chart_ct002.tcb)` with an **i** button next to
+`SML Chart + Marstek CT002 (sml_chart_ct002)` with an **i** button next to
 the list that opens the link. The button follows the selection and dims when
 the chosen program carries no link.
 
@@ -6427,6 +6427,16 @@ both keep working.
 {"programs":[{"file":"blink.tcb","name":"Blink"},
              {"file":"sml_chart_ct002.tcb","name":"SML Chart + Marstek CT002",
               "info":"https://ottelo9.github.io/tasmota-sml-script/ct002/"}]}
+```
+
+Two optional markers for a repository that wants its OWN order (ottelo, 12.10.2026): `"ordered":true`
+on the top level keeps the list in the order of `programs` instead of sorting it by its label, and
+an entry `{"sep":1}` becomes a disabled separator line. Without `"ordered"` the list is sorted as
+before and separator entries are dropped.
+
+```json
+{"ordered":true,"programs":[{"file":"sml_simple.tcb","name":"SML Simple"},{"sep":1},
+                            {"file":"sml_chart.tcb","name":"SML Chart"}]}
 ```
 
 Notes:
