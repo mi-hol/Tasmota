@@ -797,6 +797,7 @@ export class CodeGenerator {
         this._syscallOffen = 0;                    // 1 = SYSCALL, 2 = SYSCALL2, Nummer folgt
         this._metaName = '';        // // @name:  -> header TLV 1, see compile()
         this._metaInfo = '';        // // @info:  -> header TLV 2
+        this._metaVersion = '';     // // @version: -> header TLV 3 (YYYYMMDD_HHMM)
         this.code = [];             // bytecode output
         this.constants = [];        // constant pool (strings, large numbers)
         this.globals = new Map();   // name -> { index, type, isArray, arraySize }
@@ -5548,7 +5549,7 @@ export class CodeGenerator {
         // TLV rather than fixed fields so more can be added later without
         // tripping older firmware: it reads the tags it knows and skips the rest
         // by `len`.
-        //   u8 tag, u8 len, len bytes UTF-8    tag 1 = name, 2 = info URL
+        //   u8 tag, u8 len, len bytes UTF-8    tag 1 = name, 2 = info URL, 3 = version
         const metaBytes = [];
         const pushMeta = (tag, text, max) => {
             if (!text) return;
@@ -5567,6 +5568,7 @@ export class CodeGenerator {
         };
         pushMeta(1, this._metaName, 48);
         pushMeta(2, this._metaInfo, 160);
+        pushMeta(3, this._metaVersion, 24);
         if (metaBytes.length) {
             const hs = HEADER_SIZE_V6 + metaBytes.length;
             header[20] = (hs >> 8) & 0xFF;      // rewrite header_size

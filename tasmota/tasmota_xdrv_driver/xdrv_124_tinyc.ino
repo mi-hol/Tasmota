@@ -2506,7 +2506,7 @@ static bool TinyCLoadFile(const char *path, uint8_t slot_num) {
 #endif
 
 #ifdef USE_UFILESYS
-// Read the optional plain name / info URL out of a .tcb header WITHOUT loading
+// Read the optional plain name / info URL / version out of a .tcb header WITHOUT loading
 // the program. Both are TLV records behind the fixed 40-byte V6 header; the
 // header is self-describing (header_size in B20-21), so this is just "read the
 // first header_size bytes and walk the records past byte 40".
@@ -2516,12 +2516,14 @@ static bool TinyCLoadFile(const char *path, uint8_t slot_num) {
 // in the loop task -- the mistake that made the repository box block the whole
 // device before it moved into the browser (see the Repository section below).
 //
-// Returns true if at least one field was found. Both buffers are always
-// NUL-terminated, empty when the field is absent.
+// Returns true if at least one field was found. The buffers are always
+// NUL-terminated, empty when the field is absent (ver, info: optional).
 static bool tc_tcb_meta(FS *fs, const char *path,
-                        char *name, size_t nsz, char *info, size_t isz) {
+                        char *name, size_t nsz, char *info, size_t isz,
+                        char *ver = nullptr, size_t vsz = 0) {
   if (name && nsz) name[0] = 0;
   if (info && isz) info[0] = 0;
+  if (ver && vsz) ver[0] = 0;
   if (!fs) return false;
   File f = fs->open(path, "r");
   if (!f) return false;
@@ -2545,6 +2547,7 @@ static bool tc_tcb_meta(FS *fs, const char *path,
           char *dst = nullptr; size_t dsz = 0;
           if      (tag == 1) { dst = name; dsz = nsz; }
           else if (tag == 2) { dst = info; dsz = isz; }
+          else if (tag == 3) { dst = ver;  dsz = vsz; }      // `// @version: YYYYMMDD_HHMM`
           if (dst && dsz) {
             size_t n = (len < dsz - 1) ? len : dsz - 1;
             memcpy(dst, meta + i + 2, n);
@@ -2578,6 +2581,14 @@ static void tc_ind_path(const char *path, char *out, size_t osz) {
   char *dot = strrchr(slash ? slash : out, '.');
   if (dot) *dot = 0;
   strlcat(out, ".ind", osz);
+}
+
+// "20261017_1430" -> "17.10.26 14:30" for the slot row. Anything that is not in that form is shown as it is.
+static void tc_version_display(const char *v, char *out, size_t osz) {
+  bool form = strlen(v) == 13 && v[8] == '_';
+  for (int i = 0; form && i < 13; i++) { if (i != 8 && !isdigit((unsigned char)v[i])) form = false; }
+  if (form) snprintf_P(out, osz, PSTR("%c%c.%c%c.%c%c %c%c:%c%c"), v[6], v[7], v[4], v[5], v[2], v[3], v[9], v[10], v[11], v[12]);
+  else strlcpy(out, v, osz);
 }
 
 static void HandleTinyCPage(void) {
@@ -2762,6 +2773,7 @@ static void HandleTinyCPage(void) {
     "select{min-width:0}"
     ".tc-run{color:#0a0}.tc-load{color:#fa0}.tc-empty{color:var(--c_txt);opacity:.5}"
     ".tc-err{color:#f44}"
+    ".tc-up{width:auto;padding:0 6px;margin-left:6px;line-height:1.4rem;font-size:.85em;background:#fa0;color:#000}"
     ".tc-row{display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #333}"
     ".tc-row:last-child{border-bottom:none}"
     ".tc-info{flex:1;font-size:.9em}"
@@ -2794,14 +2806,30 @@ static void HandleTinyCPage(void) {
       // Determine filename: from loaded slot or from config
       const char *fname = (s && s->filename[0]) ? s->filename : Tinyc->slot_config[si].filename;
 
-      // Compact row: [dot status] filename (size) | buttons
+      // Slot row: the plain name out of the .tcb header instead of the file name (the name already says what
+      // it is, and "name (file)" plus version and size is too long on a phone). The file name moves into
+      // the tooltip, the state word into the dot's tooltip (the colour already says it), the size is whole kB.
+      // The version (`// @version: YYYYMMDD_HHMM`, header TLV 3) follows the name as "17.10.26 14:30".
+      // data-f / data-v / data-s let the page script offer an update when the repository's index.json has a
+      // newer version of the same file (tcUp/tcUpd). Idea and name-only row: ottelo (12.10.2026).
+      char mname[52] = { 0 }, mver[28] = { 0 }, vshow[28] = { 0 };
+#ifdef USE_UFILESYS
+      if (fname && fname[0]) {
+        if (!tc_tcb_meta(ufsp, fname, mname, sizeof(mname), nullptr, 0, mver, sizeof(mver)) && ffsp && ffsp != ufsp) {
+          tc_tcb_meta(ffsp, fname, mname, sizeof(mname), nullptr, 0, mver, sizeof(mver));
+        }
+      }
+#endif
+      tc_version_display(mver, vshow, sizeof(vshow));
+      const char *fbase = (fname && fname[0] == '/') ? fname + 1 : fname;
       WSContentSend_P(PSTR(
-        "<div class='tc-row'>"
-        "<span class='%s'>&#x25cf;</span>"
-        "<span class='tc-info'><b>%d</b> %s %s (%dB)"),
-        sc, si, state,
-        fname,
-        s ? s->program_size : 0);
+        "<div class='tc-row' data-f='%s' data-v='%s' data-s='%d'>"
+        "<span class='%s' title='%s'>&#x25cf;</span>"
+        "<span class='tc-info' title='%s'><b>%d</b> %s"),
+        fbase, HtmlEscape(String(mver)).c_str(), si, sc, state, fname, si,
+        mname[0] ? HtmlEscape(String(mname)).c_str() : fname);
+      if (mver[0]) { WSContentSend_P(PSTR(" <small style='opacity:.7'>%s</small>"), HtmlEscape(String(vshow)).c_str()); }
+      WSContentSend_P(PSTR(" (%dkB)"), s ? (int)((s->program_size + 512) / 1024) : 0);
 
       if (s && s->vm.error != 0) {
         WSContentSend_P(PSTR(" <span class='tc-err'>%s</span>"), tc_error_str(s->vm.error));
@@ -3042,7 +3070,27 @@ static void HandleTinyCPage(void) {
             "function tcOpt(s,f,n,u){var o=document.createElement('option'),"
             "b=f.slice(-4)=='.tcb'?f.slice(0,-4):f;"
             "o.value=f;o.textContent=n?n:b;if(u)o.dataset.u=u;s.appendChild(o)}"
-            "function tcrU(){var s=document.getElementById('tcrf');"
+            // A slot whose program has a NEWER version in this repository's index.json ("version":"YYYYMMDD_HHMM",
+            // same file) gets a button "🔄 17.10.26 14:30": it loads that file into the same slot, the way
+            // "Download & Load" does (tcDl). Settings stay: the .pvs is name-keyed and saved by the firmware before
+            // the upload replaces the program. "Newer" is a plain string compare; when one of the two versions is
+            // not in that form (or the slot has none) it is "different" instead. No version in the repository: no
+            // button. Rule and format agreed with ottelo, 17.10.2026.
+            "function tcV(x){var m=x.match(/^(\\d\\d)(\\d\\d)(\\d\\d)(\\d\\d)_(\\d\\d)(\\d\\d)$/);"
+            "return m?m[4]+'.'+m[3]+'.'+m[2]+' '+m[5]+':'+m[6]:x}"
+            "function tcUp(ls){document.querySelectorAll('.tc-row[data-f]').forEach(function(r){"
+            "var o=r.querySelector('.tc-up');if(o)o.remove();"
+            "var e=ls.filter(function(x){return (x.file||x.f)==r.dataset.f})[0];if(!e||!e.version)return;"
+            "var nv=e.version,ov=r.dataset.v||'',re=/^\\d{8}_\\d{4}$/;"
+            "if(nv==ov||(re.test(nv)&&re.test(ov)&&nv<ov))return;"
+            "var s=document.createElement('button');s.type='button';s.className='button tc-up';"
+            "s.title='Update';s.innerHTML='&#x1F504; '+tcV(nv);"
+            "s.onclick=function(){tcUpd(r.dataset.f,r.dataset.s,e.name||e.n||r.dataset.f)};"
+            "r.querySelector('.tc-info').appendChild(s)})}"
+            "function tcUpd(f,sl,n){var a=document.getElementById('tcrf'),b=document.getElementById('tcrs');"
+            "a.value=f;b.value=sl;if(a.value!=f||b.value!=sl)return;"
+            "if(!confirm('Update: '+n+' -> Slot '+sl+'?'))return;tcDl()}"
+"function tcrU(){var s=document.getElementById('tcrf');"
             "return s&&s.selectedIndex>=0?(s.options[s.selectedIndex].dataset.u||''):''}"
             "function tcrI(){var u=tcrU();if(u)window.open(u,'_blank','noopener')}"
             // ⚠️ DIE AUSWAHL UEBERLEBT DAS NEULADEN SONST NICHT. Chromes eigene
@@ -3100,7 +3148,7 @@ static void HandleTinyCPage(void) {
             "q.disabled=1;q.textContent=Array(21).join('\\u2500');s.appendChild(q);return}"
             "var u=e.info||'';"
             "if(u&&u.slice(0,7)!='http://'&&u.slice(0,8)!='https://')u='';"
-            "tcOpt(s,e.file||e.f||'',e.name||e.n||'',u)});tcrL()})"
+            "tcOpt(s,e.file||e.f||'',e.name||e.n||'',u)});tcrL();tcUp(ls)})"
             ".catch(function(){return tcTxt(s,f).then(tcrL)}).catch(function(e){"
             "s.innerHTML='<option>(list failed)</option>';tcrS();"
             "document.getElementById('tcrmsg').textContent='Repo list fetch failed: '+e})}"

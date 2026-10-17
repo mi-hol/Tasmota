@@ -41,6 +41,7 @@ export class CompilerError extends Error {
 //
 //   // @name: SML Chart CT002
 //   // @info: https://github.com/.../wiki/sml_chart_ct002
+//   // @version: 20261017_1430      (YYYYMMDD_HHMM, set by hand when the program changes -> header TLV 3)
 //
 // ⚠️ The FIRST match wins. compile() sees the source with #includes already
 // substituted, and a block from examples/common/ could carry such a line
@@ -54,7 +55,7 @@ export function pragmaMeta(source) {
             new RegExp('^[ \t]*//[ \t]*@' + schluessel + ':[ \t]*(.+)$', 'm'));
         return m ? m[1].trim() : '';
     };
-    return { name: hol('name'), info: hol('info') };
+    return { name: hol('name'), info: hol('info'), version: hol('version') };
 }
 
 export function compile(source, options = {}) {
@@ -98,6 +99,7 @@ export function compile(source, options = {}) {
         const codegen = new CodeGenerator(options.targetAbi);
         codegen._metaName = meta.name || '';
         codegen._metaInfo = meta.info || '';
+        codegen._metaVersion = meta.version || '';
         compiled = codegen.compile(ast);
     } catch (e) {
         if (e instanceof CodeGenError) throw new CompilerError('CodeGen', e);

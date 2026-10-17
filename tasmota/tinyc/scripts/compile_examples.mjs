@@ -30,7 +30,7 @@ const getFile = (name) => {
   throw new Error(`include "${name}" not found in examples/ or examples/common/`);
 };
 
-// `// @name:` / `// @info:` out of the UNRESOLVED source. After the #includes
+// `// @name:` / `// @info:` / `// @version:` out of the UNRESOLVED source. After the #includes
 // are substituted a line from examples/common/ could get in the way.
 const pragma = (src, key) => {
   const m = src.match(new RegExp('^[ \t]*//[ \t]*@' + key + ':[ \t]*(.+)$', 'm'));
@@ -50,7 +50,7 @@ for (const f of tcs) {
     const bin = Buffer.from(new Uint8Array(compile(src, { defines: [] }).binary));
     writeFileSync(out, bin);
     ok.push(name);
-    meta.push({ file: name + '.tcb', name: pragma(raw, 'name'), info: pragma(raw, 'info') });
+    meta.push({ file: name + '.tcb', name: pragma(raw, 'name'), info: pragma(raw, 'info'), version: pragma(raw, 'version') });
     if (prev === null) created.push(name);
     else if (!prev.equals(bin)) changed.push(name);
   } catch (e) {
@@ -74,6 +74,7 @@ const eintraege = meta.sort((x, y) => x.file.localeCompare(y.file)).map(m => {
   const o = { file: m.file };
   if (m.name) o.name = m.name;
   if (m.info) o.info = m.info;
+  if (m.version) o.version = m.version;
   return o;
 });
 writeFileSync(join(bcDir, 'index.json'),
