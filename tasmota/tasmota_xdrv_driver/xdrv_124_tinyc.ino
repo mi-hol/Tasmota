@@ -7866,11 +7866,22 @@ static void tc_worker_vm_body(void *param) {
     }
     vm->halted = true; vm->running = false;
     tc_output_flush();
+    // Unlink from the primary's heap while still holding vm_mutex: the primary writes into this VM
+    // when its heap grows (tc_heap_alloc), which must not race the free below (ottelo, 12.10.2026).
+    tc_worker_heap_unlink(vm);
     tc_current_slot = nullptr;
     if (slot->vm_mutex) xSemaphoreGive(slot->vm_mutex);
   } while (0);
 
-  // Tear down the worker VM (private stack/frames/heap only; aliased arrays untouched).
+  // The early exits above (main never halted, function gone, no stack) leave without the mutex and
+  // still linked.
+  if (vm->heap_shared) {
+    if (slot->vm_mutex) tc_vm_lock(slot->vm_mutex);
+    tc_worker_heap_unlink(vm);
+    if (slot->vm_mutex) xSemaphoreGive(slot->vm_mutex);
+  }
+
+  // Tear down the worker VM (private stack/frames only; aliased globals/heap untouched).
   slot->has_worker_vm = false;
   tc_free_worker_vm(vm);
   entry->worker_vm = nullptr;

@@ -1757,6 +1757,13 @@ typedef struct {
   int16_t       cb_arg_handle2;  // 2nd reserved handle for 2-arg callbacks, e.g. OnMqttData
   uint16_t      heap_used_peak;  // high-water heap_used in the current window (idle-shrink)
   uint16_t      heap_maint_ticks;// seconds since the last idle-shrink window boundary
+  // spawnTask worker on its own VM (USE_TINYC_WORKER_VM): it works on the primary's heap, because
+  // every array > 16 elements -- locals included -- is compiled into the slot's heap at load time.
+  // heap_shared (worker): never allocate or free it. heap_peer (TcVM*): the other VM; the primary
+  // refreshes the worker's view when its heap grows (realloc may move it).
+  // Found and fixed by ottelo, 12.10.2026 (char cfg[240] in a spawnTask FTP upload).
+  bool          heap_shared;
+  void         *heap_peer;
   // Callback function table (V3)
   TcCallback    callbacks[TC_MAX_CALLBACKS];
   uint8_t       callback_count;
@@ -4712,7 +4719,7 @@ static void tc_heap_coalesce(TcVM *vm) {
 }
 
 // Allocate a heap block, returns handle index or -1 on failure
-static int tc_heap_alloc(TcVM *vm, uint16_t size) {
+static int tc_heap_alloc_raw(TcVM *vm, uint16_t size) {
   // Lazy-allocate heap buffer
   if (!vm->heap_data) {
     uint16_t init_cap = size > 256 ? size : 256;  // start small
@@ -4819,8 +4826,35 @@ static void tc_heap_free_handle(TcVM *vm, int handle) {
   }
 }
 
+// A worker sharing the primary's heap never allocates in it. When the primary allocates, its heap may
+// have grown and moved: the worker follows. Both run bytecode only under vm_mutex, and blocking syscalls
+// copy their arguments out before they release it, so the worker never holds a stale pointer.
+static int tc_heap_alloc(TcVM *vm, uint16_t size) {
+  if (vm->heap_shared) return -1;
+  int h = tc_heap_alloc_raw(vm, size);
+  TcVM *w = (TcVM *)vm->heap_peer;
+  if (w) {
+    w->heap_data = vm->heap_data;
+    w->heap_capacity = vm->heap_capacity;
+    w->heap_handles = vm->heap_handles;
+    w->heap_used = vm->heap_used;
+    w->heap_handle_count = vm->heap_handle_count;
+  }
+  return h;
+}
+
 // Free entire heap buffer (call on VM stop/reset/reload)
 static void tc_heap_free_all(TcVM *vm) {
+  if (vm->heap_shared) return;   // a worker never frees the primary's heap (the unlink drops its view first)
+  {
+    // A worker still linked (it outlived the 2 s wait on a slot stop) loses its view: its next array
+    // access is a BOUNDS error instead of a read of freed memory.
+    TcVM *w = (TcVM *)vm->heap_peer;
+    if (w) {
+      w->heap_data = nullptr; w->heap_handles = nullptr;
+      w->heap_used = 0; w->heap_capacity = 0; w->heap_handle_count = 0;
+    }
+  }
   if (vm->heap_data) {
     free(vm->heap_data);
     vm->heap_data = nullptr;
@@ -4848,9 +4882,10 @@ static void tc_heap_free_all(TcVM *vm) {
  * on the primary VM (during the worker's vm_mutex-release window) can no longer stack a
  * frame onto the worker's parked frame — which was the PC=0 corruption. vm_mutex still
  * serialises bytecode execution between the two; globals_mux guards the raw globals[]
- * writes against the async UDP-RX apply. Cross-context data must travel through scalar
- * globals / the share-store — NOT heap objects (each VM has its own heap; a heap handle
- * is meaningless in the other VM).
+ * writes against the async UDP-RX apply. The worker also works on the primary's HEAP:
+ * the compiler puts every array > 16 elements -- locals included -- into the slot's heap
+ * at load time, so a private heap made each such array a BOUNDS error in the worker
+ * (ottelo, 12.10.2026: char cfg[240] in a spawnTask FTP backup). See heap_shared.
 \*********************************************************************************************/
 
 // Allocate + initialise a worker VM for slot `s`. Returns nullptr on OOM (caller then
@@ -4875,6 +4910,12 @@ static TcVM *tc_alloc_worker_vm(TcSlot *s, int cb_idx) {
   memcpy(w->cb_index, p->cb_index, sizeof(w->cb_index));
   memcpy(w->watch_indices, p->watch_indices, sizeof(w->watch_indices));
   w->watch_count = p->watch_count;
+  w->heap_data = p->heap_data; w->heap_capacity = p->heap_capacity;   // SHARED HEAP
+  w->heap_handles = p->heap_handles; w->heap_used = p->heap_used;
+  w->heap_handle_count = p->heap_handle_count;
+  w->heap_shared = true;
+  w->heap_peer = p;
+  p->heap_peer = w;
   // --- PRIVATE execution state (calloc already zeroed frames[]/timers/flags) ---
   w->pc = 0; w->sp = 0; w->fp = 0; w->frame_count = 0;
   w->halted = true; w->running = false; w->error = TC_OK; w->delayed = false;
@@ -4891,8 +4932,18 @@ static TcVM *tc_alloc_worker_vm(TcSlot *s, int cb_idx) {
 // Free ONLY the worker's private state. Aliased globals/constants/code belong to the
 // primary VM and are left untouched. globals_mux is shared and intentionally kept for the
 // primary VM's lifetime (TODO: free on slot destroy).
+static void tc_worker_heap_unlink(TcVM *w) {
+  if (!w || !w->heap_shared) return;
+  TcVM *p = (TcVM *)w->heap_peer;
+  if (p && p->heap_peer == w) p->heap_peer = nullptr;
+  w->heap_data = nullptr; w->heap_handles = nullptr;   // the primary's - never freed here
+  w->heap_used = 0; w->heap_capacity = 0; w->heap_handle_count = 0;
+  w->heap_peer = nullptr; w->heap_shared = false;
+}
+
 static void tc_free_worker_vm(TcVM *w) {
   if (!w) return;
+  tc_worker_heap_unlink(w);   // before tc_heap_free_all below
   tc_close_vm_files(w);    // close any files THIS worker left open (owner-keyed, no leak)
   tc_free_all_frames(w);   // frame locals (private)
   // ⚠️ MUST follow free_all_frames, which parks the buffers in the cache rather

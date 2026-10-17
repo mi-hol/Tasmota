@@ -482,12 +482,14 @@ passiert, haengt davon ab, was der eigene Task des Slots gerade tut:
 | `spawnTask()`-Worker aktiv | **laufen, drop-on-busy** | Auf dem ESP32 laeuft der Worker in seiner **eigenen** VM (Dual-Context, Standard), daher verteilt die primaere VM weiter `EverySecond` / `WebCall` / `WebUI` / `Command` — ein Worker **und** lokales UI auf einem Slot. Ein Callback, der anfaellt waehrend der Worker den VM-Mutex haelt, wird uebersprungen (best-effort), ohne loopTask zu blockieren. Nur **ein** `spawnTask` pro Slot. |
 
 > **Dual-Context-Worker-VM — Standard auf ESP32 (`USE_TINYC_WORKER_VM`).** Ein
-> `spawnTask()`-Worker erhaelt seine **eigene** VM (privater Operandenstack / Aufruframes /
-> Heap), die sich nur das `globals[]` des Slots teilt — so koennen ein Hintergrund-Worker
-> **und** ein lokales Web-UI / LCD / `EverySecond` auf **demselben** Slot koexistieren. Daten
-> zwischen den Kontexten laufen ueber skalare `global`-Variablen / den Share-Store — **nicht**
-> ueber Heap-Objekte (jede VM hat ihren eigenen Heap, ein Heap-Handle ist ueber die Grenze
-> hinweg bedeutungslos). Schreibzugriffe auf globals[] sind per Lock geschuetzt; Callbacks
+> `spawnTask()`-Worker erhaelt seine **eigene** VM (privater Operandenstack / Aufruframes), die sich das
+> `globals[]` und den **Heap** des Slots teilt — so koennen ein Hintergrund-Worker
+> **und** ein lokales Web-UI / LCD / `EverySecond` auf **demselben** Slot koexistieren. Arrays —
+> auch lokale — funktionieren im Worker (nach 1.6.73; bis 1.6.73 war jedes Array ueber 16
+> Elementen dort ein BOUNDS-Fehler, bei solcher Firmware `TaskLoop()` nehmen); der Worker
+> belegt im gemeinsamen Heap nichts selbst. Benutzen Worker und Callback dasselbe Array, teilen
+> sie den Puffer — Daten also ueber skalare `global`-Variablen / den Share-Store uebergeben.
+> Schreibzugriffe auf globals[] sind per Lock geschuetzt; Callbacks
 > nutzen drop-on-busy am VM-Mutex, ohne loopTask zu blockieren.
 
 > **Deaktivieren — `USE_TINYC_NO_WORKER_VM`.** Mit diesem Flag gebaut, kehrt das Verhalten
@@ -552,8 +554,8 @@ passiert, haengt davon ab, was der eigene Task des Slots gerade tut:
 3. **Lange / kontinuierliche blockierende Arbeit + lokales UI → `spawnTask()`
    (Dual-Context, Standard).** Auf dem ESP32 laeuft der Worker in seiner eigenen VM, daher
    feuern `EverySecond` / `WebCall` weiter auf der primaeren VM — LCD / Web-Zeilen lokal
-   zeichnen, waehrend der Worker blockiert. Die Grenze mit skalaren `global`-Variablen / dem
-   Share-Store ueberbruecken, nie mit Heap-Objekten. (Bei einem `USE_TINYC_NO_WORKER_VM`-Build
+   zeichnen, waehrend der Worker blockiert. Daten ueber skalare `global`-Variablen / den
+   Share-Store uebergeben (Arrays im Worker gehen erst nach 1.6.73, vorher `TaskLoop()`). (Bei einem `USE_TINYC_NO_WORKER_VM`-Build
    wird der Slot stattdessen kopflos — dann Ergebnisse als `global` (UDP)-Variablen
    veroeffentlichen und aus einem zweiten Slot oder Geraet rendern.)
 

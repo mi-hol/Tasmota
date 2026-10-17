@@ -568,11 +568,13 @@ what the slot's own task is doing:
 > the mutex, since the usable window can be a single tick wide.
 
 > **Dual-context worker VM — default on ESP32 (`USE_TINYC_WORKER_VM`).** A `spawnTask()`
-> worker gets its **own** VM (private operand stack / call frames / heap) that shares only the
-> slot's `globals[]`, so a background worker **and** a local web UI / LCD / `EverySecond`
-> coexist on the **same** slot. Cross-context data travels through scalar `global` variables /
-> the share-store — **not** heap objects (each VM has its own heap, so a heap handle is
-> meaningless across the boundary). globals[] writes are guarded by a lock; callbacks
+> worker gets its **own** VM (private operand stack / call frames) that shares the
+> slot's `globals[]` and its **heap**, so a background worker **and** a local web UI / LCD /
+> `EverySecond` coexist on the **same** slot. Arrays — locals included — work in a worker
+> (after 1.6.73; up to 1.6.73 every array > 16 elements was a BOUNDS error there, use
+> `TaskLoop()` on such firmware); the worker never allocates in the shared heap. A worker and
+> a callback that use the same array share the buffer, so hand data across through scalar
+> `global` variables / the share-store. globals[] writes are guarded by a lock; callbacks
 > drop-on-busy on the VM mutex, never blocking loopTask.
 
 > **Opt out — `USE_TINYC_NO_WORKER_VM`.** Building with this flag reverts to the legacy

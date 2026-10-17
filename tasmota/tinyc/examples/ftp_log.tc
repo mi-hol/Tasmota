@@ -24,11 +24,12 @@
 //
 // Gesendet wird aus TaskLoop(), nicht aus EverySecond (dort hielte die
 // Uebertragung den VM-Mutex und froere alle Slots ein) und NICHT aus
-// einem spawnTask-Worker: der hat auf dem ESP32 seine eigene VM und sieht
-// den Zeilenpuffer nicht -- ein char[] ueber 16 Zeichen liegt im Heap, und
-// Heap-Objekte teilt ein Worker nicht (nur skalare Globals). TaskLoop laeuft
-// auf dem VM-Task, teilt alles und gibt den Mutex waehrend der Uebertragung
-// frei; EverySecond sammelt derweil weiter.
+// einem spawnTask-Worker: bis 1.6.73 hat der auf dem ESP32 seine eigene VM mit
+// leerem Heap und sieht den Zeilenpuffer nicht -- ein char[] ueber 16 Zeichen
+// liegt im Heap (Fehler BOUNDS; seit dem Fix nach 1.6.73 teilt der Worker den
+// Heap, siehe worker_arrays_test.tc). TaskLoop ist trotzdem der einfachere Weg:
+// es laeuft auf dem VM-Task, teilt alles und gibt den Mutex waehrend der
+// Uebertragung frei; EverySecond sammelt derweil weiter.
 // ─────────────────────────────────────────────────────────────────────
 
 char host[64]   = "192.168.178.1";

@@ -509,22 +509,25 @@ One-liner per group — full signatures in `TinyC_Reference.md §Built-in Functi
     numbers with `sprintf` instead of handing strings down. Same root cause as the
     string-ternary bug fixed the same day in `codegen.js` (that one is compiler-side and
     works on shipped firmware).
-20. **Using ANY array inside a `spawnTask` worker (ESP32)** — a worker runs on its OWN
-    `TcVM` with its OWN heap (`USE_TINYC_WORKER_VM`, default-on). Every array > 16
-    elements lives in the heap, and the heap arrays come from a **table in the `.tcb`
-    header that only the LOADER fills in, into the PRIMARY VM's heap**. The worker never
-    reads that table, so in the worker every array has size 0 and the first access dies:
+20. **Using ANY array inside a `spawnTask` worker (ESP32) on firmware up to 1.6.73** — a worker
+    runs on its OWN `TcVM` (`USE_TINYC_WORKER_VM`, default-on). Every array > 16 elements lives
+    in the slot's heap, locals included, and the heap blocks are allocated by the LOADER in the
+    PRIMARY VM. Until 1.6.73 the worker had an empty private heap, so in it every such array had
+    size 0 and the first access died (once even with a reset):
     ```
     TCC: BOUNDS heap[0] idx=0 size=0 pc=370
     ```
-    Declaring the array locally inside the worker does **not** help — locals and globals
-    share the same table. Only **scalar** globals and the share-store cross the boundary
-    (the comment above `tc_alloc_worker_vm()` says so, but nobody reads the VM header
-    while writing a script). It looks exactly like an index bug, and it only shows at the
-    FIRST access, far from the declaration.
-    **Fix: if the job needs buffers AND waiting, use `TaskLoop()`, not `spawnTask()`.**
-    `TaskLoop` runs on the primary VM — all arrays present, `delay()` allowed. Cost a
-    morning on 2026-08-03 (`sma_sunnyboy.tc` + two SPP probes, all err=9).
+    ⭐ **Fixed after 1.6.73** (ottelo found and fixed it, 12.10.2026, `char cfg[240]` in an FTP
+    upload worker): the worker works on the PRIMARY's heap (`TcVM.heap_shared` / `heap_peer`,
+    the `tc_heap_alloc` wrapper refreshes the worker's view when the primary's heap grows,
+    `tc_worker_heap_unlink()` under `vm_mutex` before the worker is freed). The worker never
+    allocates itself. Tested on an ESP32-S3: local `char[240]`, a 15 s worker with `delay()` next
+    to commands and web renders, 30 runs in a row, stop / eject / reload / reset with a worker
+    running — see `examples/worker_arrays_test.tc`. Limits: a worker and a callback that use the
+    SAME array share the buffer (as TaskLoop and callbacks always did); a worker that outlives a
+    slot stop by more than the 2 s wait loses its heap view (BOUNDS error, no crash).
+    **On firmware up to 1.6.73: if the job needs buffers AND waiting, use `TaskLoop()`, not
+    `spawnTask()`** — it runs on the primary VM with all arrays present and `delay()` allowed.
 
 21. **Adding a syscall that takes a `char[]` without `strArgs` in `codegen.js`** — the
     buffer is then passed **by value instead of by reference**. The call compiles, runs,
