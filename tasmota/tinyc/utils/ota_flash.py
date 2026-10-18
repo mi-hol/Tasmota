@@ -68,6 +68,16 @@ def local_ips():
 
 
 def pick_local_ip(dev_ip):
+    # The address the OS would really use to reach the device comes first. gethostname() can resolve to a STALE
+    # address (router DNS, 18.10.2026: .83 although the Mac was .68): the device then waits for a download that
+    # never arrives, and the script ends with a misleading "OTA UNCONFIRMED".
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect((dev_ip, 80)); ip = s.getsockname()[0]; s.close()
+        if ip and not ip.startswith('127.'):
+            return ip
+    except Exception:
+        pass
     sub = dev_ip.rsplit('.', 1)[0] + '.'
     for ip in local_ips():
         if ip.startswith(sub):

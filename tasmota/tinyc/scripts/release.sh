@@ -62,6 +62,8 @@ STD_TARGETS=(
   tinyc32c6        # ESP32-C6           (Matter as plugin only)
   tinyc32-p4-full  # ESP32-P4 16MB+PSRAM — FULL: DSI display + LVGL, MIPI camera, audio; Matter as plugin only
   tinyc8266-4M     # ESP8266 4MB — lean (no Matter / LVGL / camera); HWDT fix, runs basic programs
+  tinyc32s3-eth-guard   # ESP32-S3 16MB + Ethernet (W5500) + EEBUS Steuerbox (xdrv_126), for Andreas' users (docs/EEBUS_ETHERNET.md)
+  tinyc32s3-eth-steuve  # same with the SteuVE driver (xdrv_128); the two drivers exclude each other
 )
 
 # ─────────── Argument parsing ────────────────────────────────────────────────
@@ -275,6 +277,11 @@ run "cp '$TINYC_DIR/docs/PICOTTS_PLUGIN_DE.md' '$STAGE_DIR/'"
 run "cp '$TINYC_DIR/docs/MATTER_PLUGIN_DE.md' '$STAGE_DIR/'"
 run "cp '$TINYC_DIR/TinyC_Reference.md'    '$STAGE_DIR/'"
 run "cp '$TINYC_DIR/TinyC_Reference_DE.md' '$STAGE_DIR/'"
+# EEBUS images (tinyc32s3-eth-*): the pages the drivers read from the file system, the guide and the SteuVE description
+run "cp '$TINYC_DIR/docs/EEBUS_ETHERNET.md' '$STAGE_DIR/'"
+run "cp '$TASMOTA_ROOT/tasmota/tasmota_xdrv_driver/steuerbox.html' '$STAGE_DIR/'"
+run "cp '$TASMOTA_ROOT/tasmota/tasmota_xdrv_driver/steuve.html' '$STAGE_DIR/'"
+run "cp '$TASMOTA_ROOT/info/xdrv_128_eebus_steuve.md' '$STAGE_DIR/'"
 
 # ─────────── Build release notes ─────────────────────────────────────────────
 # Local only (files under $STAGE_DIR), so this also runs with --dry-run.
@@ -309,6 +316,9 @@ cat > "$COMBINED_NOTES" <<HEADER
 | \`tinyc32c6.bin\` / \`.factory.bin\` | ESP32-C6 — Matter as plugin |
 | \`tinyc32-p4-full.bin\` / \`.factory.bin\` | ESP32-P4 16MB+PSRAM — **FULL**: DSI display + **LVGL**, MIPI camera, audio; Matter as plugin |
 | \`tinyc8266-4M.bin\` / \`.bin.gz\` | **ESP8266** 4MB — lean (no Matter / LVGL / camera); runs basic TinyC programs (HWDT fix). Flash the \`.bin\` (OTA/esptool); no \`.factory.bin\` |
+| \`tinyc32s3-eth-guard.bin\` / \`.factory.bin\` | **EEBUS Steuerbox** on an ESP32-S3 16MB with **Ethernet (W5500)**, e.g. Waveshare ESP32-S3-ETH — no camera / Matter / LVGL. Page \`steuerbox.html\` goes into the file system. See \`EEBUS_ETHERNET.md\` |
+| \`tinyc32s3-eth-steuve.bin\` / \`.factory.bin\` | **EEBUS SteuVE** (controllable consumer), same hardware; page \`steuve.html\`. The two EEBUS drivers exclude each other, hence two images |
+| \`EEBUS_ETHERNET.md\`, \`steuerbox.html\`, \`steuve.html\`, \`xdrv_128_eebus_steuve.md\` | Guide (EN/DE), the two pages, SteuVE description |
 | \`MATTERF_32.bin\` / \`MATTERF_32r.bin\` | Matter plugin — \`_32\` for the S3, \`_32r\` for C3 / C6 / P4 |
 | \`I2SAUDIO_32.bin\` | Audio plugin (S3/ESP32): audio I/O needs it, the built-in I2S audio is off in these builds. Load like the Matter plugin, tick "Autostart plugins at boot" — see tasmota/tinyc/dfrobot/ANLEITUNG.md |
 | \`PICOTTS_32.bin\` | Text-to-speech plugin (S3/ESP32): \`I2STTS\` speaks with it, no special firmware needed. Needs \`I2SAUDIO_32.bin\` and the voice files, see PICOTTS_PLUGIN.md |
