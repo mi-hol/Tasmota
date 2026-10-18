@@ -3067,9 +3067,13 @@ static void HandleTinyCPage(void) {
             // e-Dateien. Die IDE-Liste „Repo Examples" bildet dasselbe Etikett aus index.json.
             "function tcLb(e){var n=e.name||e.n||'',f=e.file||e.f||'';"
             "if(f.slice(-4)=='.tcb')f=f.slice(0,-4);return n?n:f}"
-            "function tcOpt(s,f,n,u){var o=document.createElement('option'),"
-            "b=f.slice(-4)=='.tcb'?f.slice(0,-4):f;"
-            "o.value=f;o.textContent=n?n:b;if(u)o.dataset.u=u;s.appendChild(o)}"
+            // ottelo's wish (18.10.2026): the version DATE behind the name, "SML Chart <middle dot> 14.10.26" (no time: the closed
+            // select is cut off on a phone; the full version is in the slot row). No version, or not in the
+            // YYYYMMDD_HHMM form: name only. tcLb (sorting) stays the plain name.
+            "function tcVd(x){var m=(x||'').match(/^(\\d\\d)(\\d\\d)(\\d\\d)(\\d\\d)_\\d{4}$/);return m?m[4]+'.'+m[3]+'.'+m[2]:''}"
+            "function tcOpt(s,f,n,u,v){var o=document.createElement('option'),"
+            "b=f.slice(-4)=='.tcb'?f.slice(0,-4):f,d=tcVd(v);"
+            "o.value=f;o.textContent=(n?n:b)+(d?' \\u00b7 '+d:'');if(u)o.dataset.u=u;s.appendChild(o)}"
             // A slot whose program has a NEWER version in this repository's index.json ("version":"YYYYMMDD_HHMM",
             // same file) gets a button "🔄 17.10.26 14:30": it loads that file into the same slot, the way
             // "Download & Load" does (tcDl). Settings stay: the .pvs is name-keyed and saved by the firmware before
@@ -3148,7 +3152,7 @@ static void HandleTinyCPage(void) {
             "q.disabled=1;q.textContent=Array(21).join('\\u2500');s.appendChild(q);return}"
             "var u=e.info||'';"
             "if(u&&u.slice(0,7)!='http://'&&u.slice(0,8)!='https://')u='';"
-            "tcOpt(s,e.file||e.f||'',e.name||e.n||'',u)});tcrL();tcUp(ls)})"
+            "tcOpt(s,e.file||e.f||'',e.name||e.n||'',u,e.version)});tcrL();tcUp(ls)})"
             ".catch(function(){return tcTxt(s,f).then(tcrL)}).catch(function(e){"
             "s.innerHTML='<option>(list failed)</option>';tcrS();"
             "document.getElementById('tcrmsg').textContent='Repo list fetch failed: '+e})}"

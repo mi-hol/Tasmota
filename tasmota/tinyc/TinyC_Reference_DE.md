@@ -6147,7 +6147,7 @@ das:
 ```
 
 Der Compiler legt sie in den `.tcb`-Kopf, und die Seite zeigt dann
-`SML Chart + Marstek CT002` (nur der Name; der Dateiname steht als Tooltip der Slot-Zeile) samt einem
+`SML Chart + Marstek CT002` (nur der Name, dazu das Versionsdatum aus der `"version"` des Repositorys, wenn es eine gibt: `SML Chart · 14.10.26`; der Dateiname steht als Tooltip der Slot-Zeile) samt einem
 **i**-Knopf neben der Liste, der den Link oeffnet. Der Knopf folgt der Auswahl und blendet ab,
 wenn das gewaehlte Programm keinen Link traegt.
 

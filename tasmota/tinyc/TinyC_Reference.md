@@ -6420,7 +6420,7 @@ otherwise. Two comment lines at the top of the `.tc` fix that:
 ```
 
 The compiler puts them into the `.tcb` header, and the page then shows
-`SML Chart + Marstek CT002` (name only; the file name is the tooltip of a slot row) with an **i** button
+`SML Chart + Marstek CT002` (name only, plus the version date from the repository's `"version"` when there is one: `SML Chart · 14.10.26`; the file name is the tooltip of a slot row) with an **i** button
 next to the list that opens the link.
 
 `@version` is optional: `YYYYMMDD_HHMM`, date **and** time, set by hand whenever the program changes (not
