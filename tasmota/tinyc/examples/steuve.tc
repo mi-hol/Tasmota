@@ -1,4 +1,5 @@
-// @name: SteuVE Verbraucher v004
+// @name: SteuVE Verbraucher
+// @version: 20261009_2000
 // ─────────────────────────────────────────────────────────────────────
 // steuve_verbraucher.tc — schaltet Verbraucher (Shelly im WLAN/LAN) nach der §14a-Grenze, die der
 // Treiber xdrv_128 (steuerbare Verbrauchseinrichtung, Rolle 3) vom Energy Guard empfaengt.
