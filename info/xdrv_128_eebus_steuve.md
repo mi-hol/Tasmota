@@ -1,6 +1,6 @@
 # SteuVE – steuerbare Verbrauchseinrichtung über EEBUS (`xdrv_128_eebus_steuve`)
 
-Stand: SteuVE v014 (Treiber), Skript `slot0-steuve_v004` (TinyC), Seite `steuve.html`.
+Stand: SteuVE v014 (Treiber), Skript `steuve` (TinyC, Version in `// @version:`, aktuell 20261009_2000), Seite `steuve.html`.
 
 ## Wozu
 
@@ -124,7 +124,7 @@ Erreichbar über einen Knopf auf der Tasmota-Hauptseite. Reiter:
 | Protokoll | Verlauf der Begrenzungen (`/steuve_log.csv`) |
 | Test & Einstellungen | Grenze simulieren (nur Inbetriebnahme), Kenndaten (Nennleistung, Failsafe-Grenze und -Mindestdauer, Zählerstand, Grenze zuletzt von), Erklärung der Zustände |
 
-## Das Skript `slot0-steuve_v004`
+## Das Skript `steuve`
 
 - **Plätze 1–4** = Verbraucher, Platz = Priorität. Prio 4 wird zuerst abgeschaltet, Prio 1 zuletzt.
   **Platz 5** = Melder (Shelly Plus Plug S oder Plug PM): LED-Ring grün = frei, gelb = begrenzt, rot = Failsafe,
@@ -154,7 +154,7 @@ fiel die `.pvs` auf denselben Pfad wie das Programm und überschrieb es (behoben
 ## Einrichtung Schritt für Schritt
 
 1. Firmware mit `USE_EEBUS_STEUVE` bauen und flashen. `steuve.html` ins Dateisystem laden.
-2. Skript übersetzen, als `slot0-steuve_v004.tcb` in Slot 0 laden, Autostart an. Kennung setzen:
+2. Skript übersetzen, als `steuve.tcb` in Slot 0 laden, Autostart an. Kennung setzen:
    `EEBusCsTyp wallbox`.
 3. Auf `/steuve` im Reiter **Shellys** die Verbraucher eintragen: IP, Name, Nennleistung, abschaltbar.
 4. **Ohne Energiemanager testen:** im Reiter **Test** eine Grenze simulieren (`EEBusCsSim 2000 300`) und

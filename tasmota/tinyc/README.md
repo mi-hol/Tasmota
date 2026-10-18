@@ -314,10 +314,11 @@ Programs: [tasmota-sml-script](https://github.com/ottelo9/tasmota-sml-script) �
 `/tc` page. Firmware images: [tasmota-sml-images](https://github.com/ottelo9/tasmota-sml-images).
 
 **EEBUS (Steuerbox and SteuVE) — Andreas (meierchen006).** A Tasmota device as § 14a EnWG / § 9 EEG Steuerbox
-(`xdrv_126`) or as controllable consumer / SteuVE (`xdrv_128`, with the TinyC script `steuve_v004`) for a Home Manager.
+(`xdrv_126`) or as controllable consumer / SteuVE (`xdrv_128`, with the TinyC script `steuve`) for a Home Manager.
 Ready-made ESP32-S3 + Ethernet (W5500) images: [release `eebus-eth`](https://github.com/gemu2015/Sonoff-Tasmota/releases/tag/eebus-eth); setup guide
 [`docs/EEBUS_ETHERNET.md`](docs/EEBUS_ETHERNET.md); SteuVE description
-[`xdrv_128_eebus_steuve.md`](../../info/xdrv_128_eebus_steuve.md); discussion in the
+[`xdrv_128_eebus_steuve.md`](../../info/xdrv_128_eebus_steuve.md); **Test devices, not certified** — they exist to test EEBUS communication with a Home Manager and replace neither the grid
+operator's Steuerbox nor a tested device under § 14a EnWG; discussion in the
 [photovoltaikforum thread](https://www.photovoltaikforum.com/thread/263104-eebus-steuerbox-simulator-auf-tasmota-basis/).
 
 ## VS Code Support
