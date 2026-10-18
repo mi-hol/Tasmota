@@ -305,6 +305,21 @@ See [`examples/`](examples/) for 60+ complete working programs. Highlights:
 **Basics:**
 - **blink**, **callbacks**, **benchmark**, **fibonacci**, **sort**, **strings**, **file_io**, **sensor_read**, **editor**, **watch_demo**
 
+## Smart meters, PV and EEBUS — pages from our contributors
+
+**Smart meters and PV (SML) — ottelo.** Ready-made SML programs and images with detailed guides (EN/DE):
+[overview](https://ottelo9.github.io/tasmota-sml-script/) · [SML](https://ottelo9.github.io/tasmota-sml-script/sml/) · [Marstek CT002](https://ottelo9.github.io/tasmota-sml-script/ct002/) ·
+[EcoTracker / Shelly](https://ottelo9.github.io/tasmota-sml-script/eco_shelly/) · [DFRobot camera](https://ottelo9.github.io/tasmota-sml-script/cam_dfr1154/).
+Programs: [tasmota-sml-script](https://github.com/ottelo9/tasmota-sml-script) — also selectable in the repository box of the
+`/tc` page. Firmware images: [tasmota-sml-images](https://github.com/ottelo9/tasmota-sml-images).
+
+**EEBUS (Steuerbox and SteuVE) — Andreas (meierchen006).** A Tasmota device as § 14a EnWG / § 9 EEG Steuerbox
+(`xdrv_126`) or as controllable consumer / SteuVE (`xdrv_128`, with the TinyC script `steuve_v004`) for a Home Manager.
+Ready-made ESP32-S3 + Ethernet (W5500) images: [release `eebus-eth`](https://github.com/gemu2015/Sonoff-Tasmota/releases/tag/eebus-eth); setup guide
+[`docs/EEBUS_ETHERNET.md`](docs/EEBUS_ETHERNET.md); SteuVE description
+[`xdrv_128_eebus_steuve.md`](../../info/xdrv_128_eebus_steuve.md); discussion in the
+[photovoltaikforum thread](https://www.photovoltaikforum.com/thread/263104-eebus-steuerbox-simulator-auf-tasmota-basis/).
+
 ## VS Code Support
 
 Install the `vscode-tinyc` extension for `.tc` syntax highlighting with full TinyC keyword, builtin, and callback coloring. Copy or symlink to `~/.vscode/extensions/tinyc-1.0.0`.
