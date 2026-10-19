@@ -317,7 +317,7 @@ Programs: [tasmota-sml-script](https://github.com/ottelo9/tasmota-sml-script) �
 (`xdrv_126`) or as controllable consumer / SteuVE (`xdrv_128`, with the TinyC script `steuve`) for a Home Manager.
 Ready-made ESP32-S3 + Ethernet (W5500) images: [release `eebus-eth`](https://github.com/gemu2015/Sonoff-Tasmota/releases/tag/eebus-eth); setup guide
 [`docs/EEBUS_ETHERNET.md`](docs/EEBUS_ETHERNET.md); SteuVE description
-[`xdrv_128_eebus_steuve.md`](../../info/xdrv_128_eebus_steuve.md); **Test devices, not certified** — they exist to test EEBUS communication with a Home Manager and replace neither the grid
+[`xdrv_128_eebus_steuve.md`](../../info/xdrv_128_eebus_steuve.md); **Test devices, not certified** — they exist to test EEBUS communication with a HEMS (home energy management system) and replace neither the grid
 operator's Steuerbox nor a tested device under § 14a EnWG; discussion in the
 [photovoltaikforum thread](https://www.photovoltaikforum.com/thread/263104-eebus-steuerbox-simulator-auf-tasmota-basis/).
 

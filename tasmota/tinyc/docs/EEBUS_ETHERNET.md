@@ -2,8 +2,8 @@
 
 ## English
 
-> ⚠️ **Test devices, not certified.** The Steuerbox and the SteuVE exist to test EEBUS communication with a Home Manager
-> and to publish the results. They are not certified and replace neither the Steuerbox of the grid operator nor a
+> ⚠️ **Test devices, not certified.** The Steuerbox and the SteuVE exist to test EEBUS communication with a HEMS (home
+> energy management system) and to publish the results. They are not certified and replace neither the Steuerbox of the grid operator nor a
 > tested device under § 14a EnWG. Do not use them for regular operation.
 
 Two ready-made images for an **ESP32-S3 with 16 MB flash and PSRAM and a W5500 Ethernet chip** (tested hardware:
@@ -57,6 +57,16 @@ For a Steuerbox and a SteuVE you need **two devices**.
    is untested), load the script *SteuVE Verbraucher* from the TinyC page (Repository box) into slot 0; description in `xdrv_128_eebus_steuve.md`
    (attached).
 
+### Building it yourself
+
+The images above already have what the drivers need. If you build `xdrv_126` / `xdrv_128` yourself, two settings are required, otherwise the connection fails: **`USE_MQTT_CLIENT_CERT`** (without it the TLS library never sends the device's own certificate, and the HEMS / charging station aborts with `handshake_failure`, `tls connect err=296` in the console) and **`SET_ESP32_STACK_SIZE (24 * 1024)`** (with 12 KB the device crashes while signing with ECDSA). From `universal` commit "EEBUS: USE_MQTT_CLIENT_CERT und 24-KB-Stapel automatisch" on, `my_user_config.h` sets both as soon as `USE_EEBUS_GUARD` or `USE_EEBUS_STEUVE` is defined; with an older checkout add these lines to `user_config_override.h`:
+
+```c
+#define USE_MQTT_CLIENT_CERT
+#undef  SET_ESP32_STACK_SIZE
+#define SET_ESP32_STACK_SIZE (24 * 1024)
+```
+
 Background and discussion: https://www.photovoltaikforum.com/thread/263104-eebus-steuerbox-simulator-auf-tasmota-basis/
 
 ⚠️ **Own certificate, own risk.** Whoever reaches the device's SHIP port is accepted (the SKI of the peer comes from
@@ -64,8 +74,8 @@ the mDNS scan and is not checked against its certificate). Use it in your own ne
 
 ## Deutsch
 
-> ⚠️ **Testgeräte, nicht zertifiziert.** Steuerbox und SteuVE dienen dazu, die EEBUS-Kommunikation mit einem Home Manager
-> zu prüfen und die Ergebnisse öffentlich zu machen. Sie sind nicht zertifiziert und ersetzen weder die Steuerbox des
+> ⚠️ **Testgeräte, nicht zertifiziert.** Steuerbox und SteuVE dienen dazu, die EEBUS-Kommunikation mit einem HEMS
+> (Energiemanagementsystem) zu prüfen und die Ergebnisse öffentlich zu machen. Sie sind nicht zertifiziert und ersetzen weder die Steuerbox des
 > Messstellenbetreibers noch ein geprüftes Gerät nach § 14a EnWG. Nicht für den regulären Betrieb verwenden.
 
 Zwei fertige Images für einen **ESP32-S3 mit 16 MB Flash, PSRAM und W5500-Ethernet** (erprobt: Waveshare
@@ -107,6 +117,16 @@ Für Steuerbox und SteuVE braucht man **zwei Geräte**.
    `EEBusConnect <ski|idx>`, dann die SKI des Geräts beim Home Manager bestätigen. **SteuVE:** `EEBusCsTyp wallbox` setzen (unter dieser Kennung hat der erprobte Home Manager sie angenommen, die
    Vorgabe `wp` ist ungetestet), auf der TinyC-Seite (Repository-Box) das Skript *SteuVE Verbraucher* in Slot 0 laden; Beschreibung in `xdrv_128_eebus_steuve.md`
    (angehängt).
+
+### Selbst bauen
+
+Die Images oben haben schon, was die Treiber brauchen. Wer `xdrv_126` / `xdrv_128` selbst baut, braucht zwei Einstellungen, sonst scheitert die Verbindung: **`USE_MQTT_CLIENT_CERT`** (ohne sie schickt die TLS-Bibliothek das eigene Zertifikat nie, und das HEMS bzw. die Ladestation bricht mit `handshake_failure` ab, in der Konsole `tls connect err=296`) und **`SET_ESP32_STACK_SIZE (24 * 1024)`** (mit 12 KB stürzt das Gerät beim Signieren mit ECDSA ab). Ab dem `universal`-Commit „EEBUS: USE_MQTT_CLIENT_CERT und 24-KB-Stapel automatisch“ setzt `my_user_config.h` beides, sobald `USE_EEBUS_GUARD` oder `USE_EEBUS_STEUVE` definiert ist; bei einem älteren Stand diese Zeilen in die `user_config_override.h`:
+
+```c
+#define USE_MQTT_CLIENT_CERT
+#undef  SET_ESP32_STACK_SIZE
+#define SET_ESP32_STACK_SIZE (24 * 1024)
+```
 
 Hintergrund und Diskussion: https://www.photovoltaikforum.com/thread/263104-eebus-steuerbox-simulator-auf-tasmota-basis/
 

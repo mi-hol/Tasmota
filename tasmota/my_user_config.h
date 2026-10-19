@@ -1407,6 +1407,10 @@
 #if defined(USE_MQTT_AWS_IOT) && !defined(USE_MQTT_CLIENT_CERT)
   #define USE_MQTT_CLIENT_CERT                   // USE_MQTT_AWS_IOT requires USE_MQTT_CLIENT_CERT
 #endif
+#if (defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE)) && !defined(USE_MQTT_CLIENT_CERT)
+  #define USE_MQTT_CLIENT_CERT                   // EEBUS (SHIP) needs mutual TLS: without it the TLS library never sends our certificate and the
+                                                 // peer (HEMS, charging station) aborts with handshake_failure ("tls connect err=296"). Andreas, 19.10.2026
+#endif
 
 /*********************************************************************************************\
  * Post-process obsoletes
@@ -1472,6 +1476,13 @@
     #define SET_ESP32_STACK_SIZE (24 * 1024)
   #endif
 #endif // USE_LVGL && USE_LVGL_FREETYPE
+
+#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE)   // signing with ECDSA (SHIP/TLS) crashes the box with a 12 KB stack
+  #if SET_ESP32_STACK_SIZE < (24 * 1024)
+    #undef SET_ESP32_STACK_SIZE
+    #define SET_ESP32_STACK_SIZE (24 * 1024)
+  #endif
+#endif // USE_EEBUS_GUARD || USE_EEBUS_STEUVE
 
 /*********************************************************************************************\
  * Post-process I2S
