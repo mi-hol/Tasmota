@@ -11,8 +11,8 @@ Waveshare ESP32-S3-ETH). The two EEBUS drivers exclude each other (same commands
 
 | File | Role | Driver |
 |---|---|---|
-| `tinyc32s3-eth-guard.bin` / `.factory.bin` | **Steuerbox** (Energy Guard): gives a Home Manager limits (§ 14a EnWG / § 9 EEG) | `xdrv_126_eebus_guard`, page `/steuerbox` |
-| `tinyc32s3-eth-steuve.bin` / `.factory.bin` | **SteuVE** (controllable consumer): takes the limit a Home Manager assigns it and switches consumers by script | `xdrv_128_eebus_steuve`, page `/steuve` |
+| `tinyc32s3-eth-guard.bin` / `.factory.bin` | **Steuerbox** (Energy Guard): gives a HEMS limits (§ 14a EnWG / § 9 EEG) | `xdrv_126_eebus_guard`, page `/steuerbox` |
+| `tinyc32s3-eth-steuve.bin` / `.factory.bin` | **SteuVE** (controllable consumer): takes the limit a HEMS assigns it and switches consumers by script | `xdrv_128_eebus_steuve`, page `/steuve` |
 
 Both contain TinyC, Ethernet (default `EthType 8` = W5500) and the EEBUS driver. They do **not** contain camera,
 Matter or LVGL — the TLS/SHIP handshake needs the heap. No Wi-Fi credentials are built in.
@@ -23,7 +23,7 @@ For a Steuerbox and a SteuVE you need **two devices**.
 
 1. **Flash.** New device: `.factory.bin` with esptool or a web installer. Device that already runs Tasmota: upload the
    `.bin` (OTA). ⚠️ Coming from another firmware the settings are reset, Wi-Fi included: make a backup first.
-2. **Ethernet pins.** *Configure Module* (or the console), for the Waveshare ESP32-S3-ETH (pins as given by the
+2. **Ethernet pins.** The images start with the Waveshare ESP32-S3-ETH template as the default, so a device that starts with default settings (new, or after `Reset 5`) already has the pins and `EthType 8`; a device that keeps older settings needs this step. *Configure Module* (or the console), for the Waveshare ESP32-S3-ETH (pins as given by the
    manufacturer, confirmed on two boards by the author of the drivers):
 
    | GPIO | Function (Tasmota component) | Console |
@@ -53,7 +53,7 @@ For a Steuerbox and a SteuVE you need **two devices**.
    `steuve.html` (SteuVE image). Both are attached to this release. Then open `http://<device>/steuerbox` or
    `/steuve`.
 4. **Steuerbox:** commands and the pairing are described at the top of `xdrv_126_eebus_guard.ino`; `EEBusScan`,
-   `EEBusConnect <ski|idx>`, then confirm the device's SKI at the Home Manager. **SteuVE:** set `EEBusCsTyp wallbox` (the Home Manager it was tested with accepted it under that identity; the default `wp`
+   `EEBusConnect <ski|idx>`, then confirm the device's SKI at the HEMS. **SteuVE:** set `EEBusCsTyp wallbox` (the HEMS it was tested with accepted it under that identity; the default `wp`
    is untested), load the script *SteuVE Verbraucher* from the TinyC page (Repository box) into slot 0; description in `xdrv_128_eebus_steuve.md`
    (attached).
 
@@ -66,6 +66,8 @@ The images above already have what the drivers need. If you build `xdrv_126` / `
 #undef  SET_ESP32_STACK_SIZE
 #define SET_ESP32_STACK_SIZE (24 * 1024)
 ```
+
+For the W5500 the SDK settings of the build are mandatory too: `CONFIG_ETH_SPI_ETHERNET_W5500=y`, `CONFIG_LWIP_UDP_RECVMBOX_SIZE=64`, `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=n` (with the Wi-Fi/lwIP buffers in PSRAM the box crashed in a TLS session) and `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768`. **Ready-made templates** by Andreas for the Waveshare ESP32-S3-ETH: [`eebus_vorlage/user_config_override.h`](eebus_vorlage/user_config_override.h) (pick exactly one of `EEBUS_STEUERBOX` / `EEBUS_STEUVE`) and [`eebus_vorlage/platformio_override.ini`](eebus_vorlage/platformio_override.ini) (env `tasmota32s3-waveshare-ETH-eebus`, with these SDK settings). A forum user built and connected with them.
 
 Background and discussion: https://www.photovoltaikforum.com/thread/263104-eebus-steuerbox-simulator-auf-tasmota-basis/
 
@@ -83,8 +85,8 @@ ESP32-S3-ETH). Die beiden EEBUS-Treiber schließen sich aus (gleiche Befehle), d
 
 | Datei | Rolle | Treiber |
 |---|---|---|
-| `tinyc32s3-eth-guard.bin` / `.factory.bin` | **Steuerbox** (Energy Guard): gibt einem Home Manager Grenzen vor (§ 14a EnWG / § 9 EEG) | `xdrv_126_eebus_guard`, Seite `/steuerbox` |
-| `tinyc32s3-eth-steuve.bin` / `.factory.bin` | **SteuVE** (steuerbare Verbrauchseinrichtung): übernimmt die Grenze, die der Home Manager ihr zuteilt, und schaltet per Skript Verbraucher | `xdrv_128_eebus_steuve`, Seite `/steuve` |
+| `tinyc32s3-eth-guard.bin` / `.factory.bin` | **Steuerbox** (Energy Guard): gibt einem HEMS Grenzen vor (§ 14a EnWG / § 9 EEG) | `xdrv_126_eebus_guard`, Seite `/steuerbox` |
+| `tinyc32s3-eth-steuve.bin` / `.factory.bin` | **SteuVE** (steuerbare Verbrauchseinrichtung): übernimmt die Grenze, die ein HEMS ihr zuteilt, und schaltet per Skript Verbraucher | `xdrv_128_eebus_steuve`, Seite `/steuve` |
 
 Beide enthalten TinyC, Ethernet (Vorgabe `EthType 8` = W5500) und den EEBUS-Treiber, aber **keine** Kamera, kein
 Matter und kein LVGL — der TLS/SHIP-Aufbau braucht den Heap. WLAN-Zugangsdaten sind nicht eingebaut.
@@ -95,7 +97,7 @@ Für Steuerbox und SteuVE braucht man **zwei Geräte**.
 
 1. **Flashen.** Neues Gerät: `.factory.bin` mit esptool oder einem Web-Installer. Gerät mit Tasmota: die `.bin` per
    OTA. ⚠️ Von einer anderen Firmware kommend werden die Einstellungen samt WLAN zurückgesetzt: vorher sichern.
-2. **Ethernet-Pins** setzen (*Konfiguration → Gerät konfigurieren* oder Konsole), für das Waveshare ESP32-S3-ETH
+2. **Ethernet-Pins.** Die Images starten mit dem Template des Waveshare ESP32-S3-ETH als Vorgabe; ein Gerät, das mit Standardeinstellungen startet (neu oder nach `Reset 5`), hat die Pins und `EthType 8` schon, ein Gerät mit älteren Einstellungen braucht diesen Schritt. Setzen (*Konfiguration → Gerät konfigurieren* oder Konsole), für das Waveshare ESP32-S3-ETH
    (Belegung laut Hersteller, auf zwei Boards vom Autor der Treiber bestätigt): siehe Tabelle oben. Konsole in einer Zeile:
    `Backlog Gpio13 736; Gpio12 672; Gpio11 704; Gpio14 5568; Gpio10 5600; Gpio9 5536; EthType 8`, danach `Restart 1`.
    Andere W5500-Boards: dieselben sechs Funktionen, andere GPIO-Nummern. Nach dem Neustart zeigt *Information* eine
@@ -114,7 +116,7 @@ Für Steuerbox und SteuVE braucht man **zwei Geräte**.
 3. **Seite hochladen** ins Dateisystem (*Konsolen → Dateisystem verwalten*): `steuerbox.html` (Steuerbox-Image) bzw.
    `steuve.html` (SteuVE-Image), beide hängen an diesem Release. Dann `http://<Gerät>/steuerbox` bzw. `/steuve` öffnen.
 4. **Steuerbox:** Befehle und Kopplung stehen am Anfang von `xdrv_126_eebus_guard.ino`; `EEBusScan`,
-   `EEBusConnect <ski|idx>`, dann die SKI des Geräts beim Home Manager bestätigen. **SteuVE:** `EEBusCsTyp wallbox` setzen (unter dieser Kennung hat der erprobte Home Manager sie angenommen, die
+   `EEBusConnect <ski|idx>`, dann die SKI des Geräts beim HEMS bestätigen. **SteuVE:** `EEBusCsTyp wallbox` setzen (unter dieser Kennung hat das erprobte HEMS sie angenommen, die
    Vorgabe `wp` ist ungetestet), auf der TinyC-Seite (Repository-Box) das Skript *SteuVE Verbraucher* in Slot 0 laden; Beschreibung in `xdrv_128_eebus_steuve.md`
    (angehängt).
 
@@ -127,6 +129,8 @@ Die Images oben haben schon, was die Treiber brauchen. Wer `xdrv_126` / `xdrv_12
 #undef  SET_ESP32_STACK_SIZE
 #define SET_ESP32_STACK_SIZE (24 * 1024)
 ```
+
+Für den W5500 sind außerdem die SDK-Einstellungen des Baus zwingend: `CONFIG_ETH_SPI_ETHERNET_W5500=y`, `CONFIG_LWIP_UDP_RECVMBOX_SIZE=64`, `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=n` (mit den WLAN-/lwIP-Puffern im PSRAM stürzte die Box in einer TLS-Sitzung ab) und `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768`. **Fertige Vorlagen** von Andreas für das Waveshare ESP32-S3-ETH: [`eebus_vorlage/user_config_override.h`](eebus_vorlage/user_config_override.h) (genau eines von `EEBUS_STEUERBOX` / `EEBUS_STEUVE` wählen) und [`eebus_vorlage/platformio_override.ini`](eebus_vorlage/platformio_override.ini) (Env `tasmota32s3-waveshare-ETH-eebus`, mit diesen SDK-Einstellungen). Ein Forum-Nutzer hat damit gebaut und sich verbunden.
 
 Hintergrund und Diskussion: https://www.photovoltaikforum.com/thread/263104-eebus-steuerbox-simulator-auf-tasmota-basis/
 
