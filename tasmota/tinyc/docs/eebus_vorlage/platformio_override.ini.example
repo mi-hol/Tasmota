@@ -1,0 +1,52 @@
+; platformio_override.ini  –  VORLAGE fuer EEBUS Steuerbox / SteuVE auf Waveshare ESP32-S3-ETH
+; Fork gemu2015/Sonoff-Tasmota, Zweig universal
+;
+; Benutzung:
+;  1. Diese Datei als  platformio_override.ini  ins Hauptverzeichnis des Repos legen
+;     (oder den Abschnitt in eine vorhandene Datei uebernehmen).
+;  2. Welches Geraet gebaut wird (Steuerbox oder SteuVE), steht in tasmota/user_config_override.h.
+;  3. upload_port an den eigenen Rechner anpassen (Windows z. B. COM5, Linux /dev/ttyACM0).
+;  4. Bauen:  pio run -e tasmota32s3-waveshare-ETH-eebus     Flashen:  pio run -e tasmota32s3-waveshare-ETH-eebus -t upload
+
+[platformio]
+default_envs                = tasmota32s3-waveshare-ETH-eebus
+
+[env:tasmota32s3-waveshare-ETH-eebus]
+extends                     = env:tasmota32_base
+board_build.f_cpu           = 240000000L
+board_build.mcu             = esp32s3
+board                       = esp32s3_16M
+build_flags                 = ${env:tasmota32_base.build_flags}
+                              -DUSE_ETHERNET
+                              -DTINYC_TESTING
+                              -DTINYC_NO_SCRIPTER
+                              -DUSE_BINPLUGINS
+lib_extra_dirs              = ${common.lib_extra_dirs}
+                              lib/libesp32
+                              lib/libesp32_div
+lib_ignore                  = ${env:tasmota32_base.lib_ignore}
+                              TTGO TWatch Library
+                              Micro-RTSP
+                              epdiy
+                              esp32-camera
+                              lib/libesp32/CORE2_Library
+                              libesp32_lvgl
+; W5500-Ethernet ueber SPI: diese SDK-Einstellungen sind ZWINGEND
+custom_sdkconfig            = CONFIG_ETH_ENABLED=y
+                              CONFIG_ETH_USE_SPI_ETHERNET=y
+                              CONFIG_ETH_SPI_ETHERNET_W5500=y
+                              CONFIG_LWIP_UDP_RECVMBOX_SIZE=64
+                              CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=n
+                              CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+; Kamera-Komponenten weglassen (spart Platz, vermeidet Bauprobleme unter Windows)
+custom_component_remove     = espressif/esp32-camera
+                              espressif/esp_jpg
+                              espressif/fb_gfx
+                              espressif/esp-dsp
+                              espressif/esp_modem
+                              espressif/network_provisioning
+; an den eigenen Rechner anpassen:
+upload_port                 = COM5
+monitor_port                = COM5
+upload_speed                = 460800
+monitor_speed               = 115200
