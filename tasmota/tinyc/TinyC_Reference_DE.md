@@ -2890,7 +2890,7 @@ Einen beliebigen Tasmota-Konsolenbefehl ausfuehren und die JSON-Antwort erfassen
 |----------------------------------------------|-------------------------------------------------------|
 | `int tasmCmd("command", char response[])`    | Befehl ausfuehren, Antwort speichern, Laenge zurueckgeben |
 | `int tasmCmd(char cmd[], char response[])`   | Befehl ausfuehren (char-Array), Antwort speichern |
-| `tasmDefer(char cmd[])` | Einen Tasmota-Befehl zur **verzoegerten** Ausfuehrung einreihen (laeuft im 50-ms-Takt, waehrend die VM angehalten ist, der VM-Mutex also frei ist). Fuer Befehle, die nicht innerhalb eines Callbacks laufen duerfen — z. B. blockierende wie `SendMail` oder alles, was die VM erneut betreten koennte. Ohne Rueckmeldung (fire and forget). |
+| `tasmDefer(char cmd[])` | Einen Tasmota-Befehl zur **verzoegerten** Ausfuehrung einreihen (laeuft im 50-ms-Takt, waehrend die VM angehalten ist, der VM-Mutex also frei ist). Fuer Befehle, die nicht innerhalb eines Callbacks laufen duerfen — z. B. blockierende wie `SendMail` oder alles, was die VM erneut betreten koennte. Ohne Rueckmeldung (fire and forget). ⚠️ Es gibt nur EINEN Warteplatz fuer ALLE Slots: solange ein Befehl wartet (bis zum naechsten 50-ms-Takt), wird jedes weitere `tasmDefer` verworfen (INFO-Logzeile `deferred command dropped`). Nicht mehrmals kurz hintereinander aufrufen; vormerken und selbst hoechstens einen Befehl je Sekunde absetzen. |
 
 **Hinweise:**
 - Befehl kann ein String-Literal oder ein char[]-Array sein

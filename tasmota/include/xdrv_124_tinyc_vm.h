@@ -4517,7 +4517,11 @@ static String tc_command_response(const char *cmd) {
 }
 
 static void tc_defer_command(const char *cmd) {
-  if (!Tinyc || Tinyc->deferred_pending) return;  // drop if one is already pending
+  if (!Tinyc) return;
+  if (Tinyc->deferred_pending) {   // ONE waiting place for all slots: drop, but say so (it used to be silent; Andreas, 20.10.2026)
+    AddLog(LOG_LEVEL_INFO, PSTR("TCC: deferred command dropped (one is still waiting): %.40s"), cmd);
+    return;
+  }
   strlcpy(Tinyc->deferred_cmd, cmd, sizeof(Tinyc->deferred_cmd));
   Tinyc->deferred_since = millis();
   Tinyc->deferred_pending = true;

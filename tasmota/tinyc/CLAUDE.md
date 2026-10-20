@@ -644,6 +644,17 @@ One-liner per group — full signatures in `TinyC_Reference.md §Built-in Functi
     their bounds (`KURVE_N`, `ABTASTRATE`). A local of the same name legitimately shadows the
     define, so that case must still fall through to a variable read.
 
+26. **Calling `tasmCmd()` inside `Command()` before `responseCmnd()`** — the nested command writes its OWN response and
+    overwrites the one you are about to give: the caller (a web page, MQTT) gets `{}` instead of your `{"X":"ok"}`.
+    Found by Andreas in `steuve.tc` (19.10.2026: "Nicht alles gespeichert: Prio 1: {}" although the data had been saved).
+    Either note what is due and do it in `EverySecond()` / `TaskLoop()` (outside the command), or send it with `tasmDefer()`.
+
+27. **Calling `tasmDefer()` several times in a row** — there is ONE waiting place for ALL slots (`Tinyc->deferred_cmd`);
+    while a command waits for the next 50 ms tick, every further `tasmDefer` is dropped (before 20.10.2026 without any
+    sign, since then an INFO log line `deferred command dropped`). A page that saves four rows with four commands loses
+    three. Note what is due and send at most one command per second yourself (`steuve.tc` v006: `nennNeu` + `EverySecond()`).
+    Even then another script on the same device can occupy the place in the same tick.
+
 Tooling note: `legacy_misc/compile_cli.js` calls `compile()` **without** a getFile
 resolver, so `#include` lines are silently ignored — it cannot verify files like
 `sml_chart.tc`. Run `resolveIncludes(src, getFile)` from `idesrc/src/preprocessor.js`

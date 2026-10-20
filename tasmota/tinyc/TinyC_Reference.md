@@ -2958,7 +2958,7 @@ Execute any Tasmota console command and capture the JSON response.
 |----------------------------------------------|------------------------------------------------|
 | `int tasmCmd("command", char response[])`    | Execute command (string literal), store response, return length |
 | `int tasmCmd(char cmd[], char response[])`   | Execute command (char array), store response, return length |
-| `tasmDefer(char cmd[])`                      | Queue a Tasmota command for **deferred** execution (runs from the 50 ms tick while the VM is halted, so the VM mutex is free). Use this for commands that must not run inside a callback — e.g. blocking ones like `SendMail`, or anything that could re-enter the VM. Fire-and-forget (no response). |
+| `tasmDefer(char cmd[])`                      | Queue a Tasmota command for **deferred** execution (runs from the 50 ms tick while the VM is halted, so the VM mutex is free). Use this for commands that must not run inside a callback — e.g. blocking ones like `SendMail`, or anything that could re-enter the VM. Fire-and-forget (no response). ⚠️ There is only ONE waiting place, shared by ALL slots: while a command is waiting (up to the next 50 ms tick), every further `tasmDefer` is dropped (INFO log line `deferred command dropped`). Do not call it several times in a row; note what is due and send at most one command per second yourself. |
 
 **Notes:**
 - Command can be a string literal (e.g., `"Status 0"`) or a `char[]` variable for dynamic commands

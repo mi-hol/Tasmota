@@ -57,6 +57,8 @@ For a Steuerbox and a SteuVE you need **two devices**.
    is untested), load the script *SteuVE Verbraucher* from the TinyC page (Repository box) into slot 0; description in `xdrv_128_eebus_steuve.md`
    (attached).
 
+⚠️ **A used SD card keeps its files.** An erase or a new image does not touch the SD card: `tinyc.cfg`, the scripts (autostart!), `.pvs` files and copies of the certificate stay. Moving a card from a SteuVE to a Steuerbox (or the other way) starts the old script there, whose `EEBusCs…` commands answer "Unknown". Clear the card first (at a PC, or file by file: `UfsList`, then `UfsDelete /name`) or delete the slots in the TinyC page.
+
 ### Building it yourself
 
 The images above already have what the drivers need. If you build `xdrv_126` / `xdrv_128` yourself, two settings are required, otherwise the connection fails: **`USE_MQTT_CLIENT_CERT`** (without it the TLS library never sends the device's own certificate, and the HEMS / charging station aborts with `handshake_failure`, `tls connect err=296` in the console) and **`SET_ESP32_STACK_SIZE (24 * 1024)`** (with 12 KB the device crashes while signing with ECDSA). From `universal` commit "EEBUS: USE_MQTT_CLIENT_CERT und 24-KB-Stapel automatisch" on, `my_user_config.h` sets both as soon as `USE_EEBUS_GUARD` or `USE_EEBUS_STEUVE` is defined; with an older checkout add these lines to `user_config_override.h`:
@@ -119,6 +121,8 @@ Für Steuerbox und SteuVE braucht man **zwei Geräte**.
    `EEBusConnect <ski|idx>`, dann die SKI des Geräts beim HEMS bestätigen. **SteuVE:** `EEBusCsTyp wallbox` setzen (unter dieser Kennung hat das erprobte HEMS sie angenommen, die
    Vorgabe `wp` ist ungetestet), auf der TinyC-Seite (Repository-Box) das Skript *SteuVE Verbraucher* in Slot 0 laden; Beschreibung in `xdrv_128_eebus_steuve.md`
    (angehängt).
+
+⚠️ **Eine benutzte SD-Karte behält ihre Dateien.** Ein Erase oder ein neues Image rührt die SD-Karte nicht an: `tinyc.cfg`, die Skripte (Autostart!), `.pvs`-Dateien und Kopien des Zertifikats bleiben. Wer eine Karte von einer SteuVE in eine Steuerbox steckt (oder umgekehrt), startet dort das alte Skript, dessen `EEBusCs…`-Befehle mit „Unknown“ antworten. Die Karte vorher leeren (am PC oder Datei für Datei: `UfsList`, dann `UfsDelete /name`) oder die Slots auf der TinyC-Seite löschen.
 
 ### Selbst bauen
 
