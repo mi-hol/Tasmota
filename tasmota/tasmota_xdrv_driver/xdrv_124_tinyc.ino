@@ -2408,6 +2408,7 @@ static void WSSendJSON(int code, const char *json_buf) {
 
 // Helper: load a .tcb file from filesystem into a specified slot
 #ifdef USE_UFILESYS
+static void TinyCAdoptPersist(const char *prev_tcb, const char *new_tcb);   // defined behind tc_tcb_meta()
 static bool TinyCLoadFile(const char *path, uint8_t slot_num) {
   if (!Tinyc) return false;
   if (slot_num >= TC_MAX_VMS) return false;
@@ -2428,6 +2429,10 @@ static bool TinyCLoadFile(const char *path, uint8_t slot_num) {
   }
   TcSlot *s = Tinyc->slots[slot_num];
   TC_HEAPLOG("loadfile.in");
+  // The program this slot ran before (the name survives a TinyCUnload in the slot's config): needed to carry its persist values
+  // over to a new version of the same script, see TinyCAdoptPersist().
+  char prev_tcb[TC_FILENAME_MAX];
+  strlcpy(prev_tcb, s->filename[0] ? s->filename : Tinyc->slot_config[slot_num].filename, sizeof(prev_tcb));
 
   File file;
   if (ufsp) file = ufsp->open(path, "r");
@@ -2493,6 +2498,7 @@ static bool TinyCLoadFile(const char *path, uint8_t slot_num) {
     strlcpy(s->filename, path, sizeof(s->filename));
     strlcpy(Tinyc->slot_config[slot_num].filename, path, sizeof(Tinyc->slot_config[slot_num].filename));
     TinyCSetPersistFile(s, path);
+    TinyCAdoptPersist(prev_tcb, path);
     AddLog(LOG_LEVEL_INFO, PSTR("TCC: Loaded %s (%d bytes) into slot %d"), path, fsize, slot_num);
     TC_HEAPLOG("loadfile.out");
     return true;
@@ -2569,6 +2575,44 @@ static bool tc_tcb_meta(FS *fs, const char *path,
     info[0] = 0;
   }
   return ok;
+}
+
+// A new VERSION of a script usually comes under a new file name (the IDE names a locally loaded file "slot<N>-<name>", so
+// slot0-steuve_v005.tcb -> slot0-steuve_v006.tcb) and with it a new, EMPTY .pvs: every saved setting seems to be gone, and the
+// user cannot know that the old values still lie in the old file (Andreas, 20.10.2026). The .pvs stores its values BY
+// VARIABLE NAME (PV3), so the old file can safely be the starting point of the new one: variables the new version has get
+// their old value, new ones keep their default, dropped ones are ignored.
+// Taken over only when ALL of this holds: the slot ran another file before, the new one has no .pvs yet, the old one has,
+// and both programs carry the same `// @name:` (so a different program is never fed foreign values). The old .pvs stays.
+static void TinyCAdoptPersist(const char *prev_tcb, const char *new_tcb) {
+  if (!ufsp || !prev_tcb || !prev_tcb[0] || !new_tcb || strcmp(prev_tcb, new_tcb) == 0) return;
+  char new_pvs[TC_FILENAME_MAX], old_pvs[TC_FILENAME_MAX];
+  tc_pvs_name(new_tcb, new_pvs, sizeof(new_pvs));
+  tc_pvs_name(prev_tcb, old_pvs, sizeof(old_pvs));
+  if (strcmp(new_pvs, old_pvs) == 0 || ufsp->exists(new_pvs) || !ufsp->exists(old_pvs)) return;
+  char n_new[52] = { 0 }, n_old[52] = { 0 };
+  if (!tc_tcb_meta(ufsp, new_tcb, n_new, sizeof(n_new), nullptr, 0) && ffsp && ffsp != ufsp) {
+    tc_tcb_meta(ffsp, new_tcb, n_new, sizeof(n_new), nullptr, 0);
+  }
+  if (!tc_tcb_meta(ufsp, prev_tcb, n_old, sizeof(n_old), nullptr, 0) && ffsp && ffsp != ufsp) {
+    tc_tcb_meta(ffsp, prev_tcb, n_old, sizeof(n_old), nullptr, 0);
+  }
+  if (!n_new[0] || strcmp(n_new, n_old) != 0) return;     // no name, or another program: nothing to carry over
+  File in = ufsp->open(old_pvs, "r");
+  if (!in) return;
+  File out = ufsp->open(new_pvs, "w");
+  if (!out) { in.close(); return; }
+  uint8_t buf[128];
+  size_t total = 0; bool ok = true;
+  while (true) {
+    int rd = in.read(buf, sizeof(buf));
+    if (rd <= 0) break;
+    if (out.write(buf, rd) != (size_t)rd) { ok = false; break; }
+    total += rd;
+  }
+  in.close(); out.close();
+  if (!ok || total == 0) { ufsp->remove(new_pvs); return; }       // a partial copy must not look like saved settings
+  AddLog(LOG_LEVEL_INFO, PSTR("TCC: persist values taken over from %s (%u B) for %s"), old_pvs, (unsigned)total, new_tcb);
 }
 #endif  // USE_UFILESYS
 
