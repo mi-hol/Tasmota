@@ -5019,7 +5019,9 @@ next_line:
         }
 
 #ifdef ESP8266
-        if (mp->meter_ss->begin(mp->params)) {
+        // pass the serial config on: TasmotaSerial takes stop bits (8N2 for Modbus), parity is only emulated by an extra
+        // stop bit there. Without it software serial always ran 8N1 and "m2" / "mN2" had no effect (@RaphaelSquair, Tasmota #7004)
+        if (mp->meter_ss->begin(mp->params, smode)) {
           mp->meter_ss->flush();
         }
         if (mp->meter_ss->hardwareSerial()) {
