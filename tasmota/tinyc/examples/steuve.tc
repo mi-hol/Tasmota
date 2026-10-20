@@ -1,5 +1,5 @@
 // @name: SteuVE Verbraucher
-// @version: 20261019_2055
+// @version: 20261020_1136
 // ─────────────────────────────────────────────────────────────────────
 // steuve_verbraucher.tc — schaltet Verbraucher (Shelly im WLAN/LAN) nach der §14a-Grenze, die der
 // Treiber xdrv_128 (steuerbare Verbrauchseinrichtung, Rolle 3) vom Energy Guard empfaengt.
@@ -44,6 +44,9 @@
 //   STVMODE 0|1|2                simulierte Abschaltung (s.o.)
 //   STVSIM <W> [s] | STVSIM 0    Grenze simulieren (ruft EEBusCsSim) — Test ohne Energy Guard
 //
+// v006 (20.10.2026): Nennleistung per tasmDefer statt tasmCmd, angestossen hoechstens einmal je Sekunde aus
+//   EverySecond() (tasmDefer hat nur EINEN Warteplatz fuer alle Slots und verwirft weitere still — mehrere STVSET
+//   kurz hintereinander duerfen ihn nicht ueberholen). STVSIM direkt per tasmDefer. TaskLoop wieder schlicht delay().
 // v005 (19.10.2026): STVSET und STVSIM rufen KEIN tasmCmd mehr im Command auf. Der verschachtelte Befehl
 //   (EEBusCsMax bzw. EEBusCsSim) ueberschrieb die Antwort: die Seite bekam "{}" statt {"STVSET":"ok"} und meldete
 //   "nicht gespeichert", obwohl Liste und .pvs stimmten. Jetzt nur vormerken; TaskLoop erledigt es binnen 0,1 s.
@@ -100,9 +103,7 @@ int letzteRunde = 0;
 int probeReq = -1;   // Platz, der in der naechsten Runde erfragt wird (-1 = keiner)
 int probeAll = 1;    // nach dem Start alle echten Plaetze einmal erfragen
 int melderFarbe = -1;   // zuletzt gesetzte Farbe (-1 = noch keine)
-int nennNeu = 0;        // v005: Nennleistung neu melden (vorgemerkt im Command, erledigt im TaskLoop)
-int simNeu = 0;         // v005: EEBusCsSim senden (vorgemerkt im Command, erledigt im TaskLoop)
-char simCmd[48];
+int nennNeu = 0;        // v006: Nennleistung neu melden (vorgemerkt im Command, angestossen in EverySecond)
 char zustand[16] = "-";
 char resp[600];
 char url[320];
@@ -328,7 +329,7 @@ void nennMelden() {
         if (belegt(i)) { nsum = nsum + nennEff(i); }
     }
     sprintf(c, "EEBusCsMax %d", nsum);   // Nennleistung = Summe der belegten Verbraucher
-    tasmCmd(c, resp);
+    tasmDefer(c);   // v006: verzoegert ausfuehren — darf auch aus Callbacks gerufen werden
 }
 
 void runde() {
@@ -451,19 +452,14 @@ void runde() {
     melder();
 }
 
-// v005: Vorgemerktes aus dem Command erledigen — hier im eigenen Ablauf, nicht waehrend eines Befehls.
-void erledigen() {
+// v006: hoechstens eine Nennleistungs-Meldung je Sekunde (tasmDefer hat nur einen Warteplatz)
+void EverySecond() {
     if (nennNeu == 1) { nennNeu = 0; nennMelden(); }
-    if (simNeu == 1) { simNeu = 0; tasmCmd(simCmd, resp); }
 }
 
 void TaskLoop() {
-    int w;
     runde();
-    for (w = 0; w < ABFRAGE_S * 10; w++) {   // statt delay(ABFRAGE_S * 1000): alle 0,1 s nachsehen
-        erledigen();
-        delay(100);
-    }
+    delay(ABFRAGE_S * 1000);
 }
 
 void WebCall() {
@@ -576,7 +572,7 @@ void Command(char cmd[]) {
         }
         if (cFake[k] != altFake || cProf[k] != altProf) { simT[k] = 0; simOn[k] = 1; simTot[k] = 0; }
         saveVars();
-        nennNeu = 1;   // v005: NICHT hier melden — ein tasmCmd im Command loescht dessen Antwort
+        nennNeu = 1;   // v006: EverySecond meldet die aktuelle Summe (kein tasmCmd im Command, s. v005)
         sprintf(c, "Platz %d gespeichert", k + 1);
         addLog("STV %s", c);
         responseCmnd("{\"STVSET\":\"ok\"}");
@@ -595,8 +591,8 @@ void Command(char cmd[]) {
         responseCmnd(c);
     } else if (strFind(cmd, "SIM") == 0) {
         strSub(a, cmd, 4, 0);
-        sprintf(simCmd, "EEBusCsSim %s", a);
-        simNeu = 1;   // v005: im TaskLoop senden, nicht hier (s. STVSET) — Ergebnis steht in EEBusCs bzw. auf der Seite
+        sprintf(c, "EEBusCsSim %s", a);
+        tasmDefer(c);   // v006: verzoegert, nicht im Command ausfuehren — Ergebnis steht in EEBusCs bzw. auf der Seite
         responseCmnd("{\"STVSIM\":\"gesendet\"}");
     } else {
         responseCmnd("STVSTAT | STVLIST | STVCFG | STVSET p,fake,abs,ip,nenn,profil,name | STVPROBE p | STVMODE 0|1|2 | STVSIM <W> [s]");
@@ -622,6 +618,6 @@ int main() {
     }
     nennMelden();
     addCommand("STV");
-    addLog("STV: SteuVE-Verbraucher v005 gestartet");
+    addLog("STV: SteuVE-Verbraucher v006 gestartet");
     return 0;
 }
