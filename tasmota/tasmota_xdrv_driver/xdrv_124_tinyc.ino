@@ -3284,9 +3284,9 @@ static void HandleTinyCPage(void) {
     // this string already carries a %s.
     "fetch('/cm?cmnd=TinyCIde'+(window.TCBASE?' '+encodeURIComponent(window.TCBASE+'/tinyc_ide.html.gz'):''))"
     ".then(r=>r.json()).then(j=>{var d=j.TinyCIde||{};"
-    "if(d.updated){b.textContent='Updated '+d.updated+' B';alert('IDE updated ('+d.updated+' bytes). Re-open the IDE.');}"
+    "if(d.updated){b.textContent='Updated '+d.updated+' B';alert('IDE updated ('+d.updated+' bytes)'+(d.flash?' and stored in the flash file system, because writing to the SD card was cut short':'')+'. Re-open the IDE.');}"
     "else{b.disabled=0;b.textContent='Update IDE';"
-    "alert('IDE update failed: '+(d.msg||('error '+d.error))+'\\n\\nThe old IDE was kept.');}})"
+    "alert('IDE update failed: '+(d.msg||('error '+d.error))+(d.kept?'\\n\\nThe old IDE was kept.':''));}})"
     ".catch(e=>{b.disabled=0;b.textContent='Update IDE';alert('IDE update request failed.');});\" "
     "class='button'>Update IDE</button>"
     "</p>"
@@ -3673,16 +3673,20 @@ void TinyCPrefixReheal(void) {
 // reported as "not enough RAM" (measured 2026-08-17).
 static int tc_ide_http = 0;
 
-static int tc_fetch_ide(const char *url) {
-  if (!ufsp || !url || !url[0]) return -1;
+// What the last attempt looked like, for the message: the numbers (bytes on disk, kB free) used to exist only in the log.
+static struct { uint32_t on_disk; int written; uint32_t free_kb; bool short_write; bool in_flash; } tc_ide_diag;
+
+// Writes to `fs` (type 0 = the user file system, normally the SD card when there is one; type 1 = the flash file system).
+static int tc_fetch_ide_fs(FS *fs, uint32_t fstype, const char *url) {
+  if (!fs || !url || !url[0]) return -1;
   const char *dst = "/tinyc_ide.html.gz";
   const char *tmp = "/tinyc_ide.html.gz.tmp";
   // A crash during an in-place write leaves a 0-byte IDE behind, and the /ide
   // handler would serve that as if it were a page (Hans, 2026-08-17: reset
   // mid-write, file left at 0 bytes). Too small to be an IDE = not an IDE.
-  { File old = ufsp->open(dst, "r");
+  { File old = fs->open(dst, "r");
     if (old) { const uint32_t sz = (uint32_t)old.size(); old.close();
-      if (sz < 1000) ufsp->remove(dst); } }
+      if (sz < 1000) fs->remove(dst); } }
 #if defined(ESP32) && defined(USE_WEBCLIENT_HTTPS)
   HTTPClientLight http;
 #else
@@ -3796,7 +3800,7 @@ static int tc_fetch_ide(const char *url) {
   bool in_place = false;
   {
     const int32_t clen = http.getSize();          // -1 when the peer chunks
-    const uint32_t free_kb = UfsInfo(1, 0);       // kB
+    const uint32_t free_kb = UfsInfo(1, fstype);       // kB
     uint32_t need_kb = (clen > 0) ? (uint32_t)((clen + 1023) / 1024) : 0;
     const char *woher = "Content-Length";
     // NO Content-Length? Then estimate from the IDE ALREADY ON THE DISK: a new
@@ -3808,7 +3812,7 @@ static int tc_fetch_ide(const char *url) {
     // worked. raw.githubusercontent.com serves the .gz chunked, so clen was -1
     // and the one guard meant to prevent exactly this never ran.
     if (!need_kb) {
-      File alt = ufsp->open(dst, "r");
+      File alt = fs->open(dst, "r");
       if (alt) {
         const uint32_t sz = (uint32_t)alt.size();
         alt.close();
@@ -3818,14 +3822,14 @@ static int tc_fetch_ide(const char *url) {
     if (need_kb && free_kb < need_kb + 8) {
       target = dst;
       in_place = true;
-      ufsp->remove(dst);
+      fs->remove(dst);
       AddLog(LOG_LEVEL_INFO, PSTR("TCC: IDE replaced in place — %u kB free, %u kB needed (from %s); "
              "no room for a second copy, the served IDE is missing until this finishes"),
              (unsigned)free_kb, (unsigned)need_kb, woher);
     }
   }
   TinyCFsWritePause(0x40000);                       // big write: quiesce VM tasks
-  File f = ufsp->open(target, "w");
+  File f = fs->open(target, "w");
   int written = 0; bool magic = false; bool write_err = false;
   if (f) {
     WiFiClient *stream = http.getStreamPtr();
@@ -3875,7 +3879,7 @@ static int tc_fetch_ide(const char *url) {
     AddLog(LOG_LEVEL_ERROR, PSTR("TCC: IDE fetch rejected (%d B, gzip=%d) — %s"),
            written, magic,
            in_place ? "no IDE on the filesystem now, retry or upload it" : "kept old");
-    ufsp->remove(target);
+    fs->remove(target);
     return -5;
   }
   // `written` counts what was DOWNLOADED, not what the FS actually persisted — an
@@ -3884,16 +3888,18 @@ static int tc_fetch_ide(const char *url) {
   // over the live IDE; a truncated-but-gzip-magic file would otherwise pass the
   // check above and brick the served IDE (Andreas, S3-ETH SD/FAT, cut at 12-37 KB).
   uint32_t on_disk = 0;
-  { File vf = ufsp->open(target, "r"); if (vf) { on_disk = (uint32_t)vf.size(); vf.close(); } }
+  { File vf = fs->open(target, "r"); if (vf) { on_disk = (uint32_t)vf.size(); vf.close(); } }
   if (write_err || on_disk != (uint32_t)written) {
+    tc_ide_diag.on_disk = on_disk; tc_ide_diag.written = written; tc_ide_diag.short_write = write_err;
+    tc_ide_diag.free_kb = (uint32_t)UfsInfo(1, fstype);
     // Name the filesystem, not just "short-write" -- that reads like a network
     // problem while it usually is a full partition.
     AddLog(LOG_LEVEL_ERROR, PSTR("TCC: IDE write incomplete (%u/%d B on disk%s), %u kB free — %s"),
-           on_disk, written, write_err ? ", short-write" : "", (unsigned)UfsInfo(1, 0),
+           on_disk, written, write_err ? ", short-write" : "", (unsigned)UfsInfo(1, fstype),
            in_place ? "no IDE on the filesystem now, retry or upload it"
                     : "kept old. If the partition is full: delete /tinyc_ide.html.gz "
                       "(UfsDelete or the file manager) and run TinyCIde again");
-    ufsp->remove(target);
+    fs->remove(target);
     return -7;
   }
   if (in_place) {                                  // already at its place
@@ -3904,16 +3910,29 @@ static int tc_fetch_ide(const char *url) {
   // overwrites atomically, so there is no window where the served IDE is
   // missing. Only if that fails (e.g. a FAT/SD backend that can't rename over
   // an existing file) fall back to remove + retry.
-  if (!ufsp->rename(tmp, dst)) {
-    ufsp->remove(dst);
-    if (!ufsp->rename(tmp, dst)) {
+  if (!fs->rename(tmp, dst)) {
+    fs->remove(dst);
+    if (!fs->rename(tmp, dst)) {
       AddLog(LOG_LEVEL_ERROR, PSTR("TCC: IDE rename failed"));
-      ufsp->remove(tmp);
+      fs->remove(tmp);
       return -6;
     }
   }
   AddLog(LOG_LEVEL_INFO, PSTR("TCC: IDE updated %d bytes from %s"), written, url);
   return written;
+}
+// The IDE goes to the user file system (the SD card when there is one). When writing THERE is cut short — an SD/FAT backend
+// does that on a fresh ESP32-S3-ETH, although the card is almost empty (Andreas, 19.10.2026) — it is written to the flash file
+// system instead: the /ide handler looks there as well. A failed attempt removes its own partial file first.
+static int tc_fetch_ide(const char *url) {
+  tc_ide_diag = {};
+  int n = tc_fetch_ide_fs(ufsp, 0, url);
+  if (n == -7 && ffsp && ffsp != ufsp) {
+    AddLog(LOG_LEVEL_INFO, PSTR("TCC: IDE write to the SD card was cut short — trying the flash file system"));
+    n = tc_fetch_ide_fs(ffsp, 1, url);
+    if (n > 0) { tc_ide_diag.in_flash = true; }
+  }
+  return n;
 }
 #endif // USE_UFILESYS
 
@@ -3933,8 +3952,20 @@ static const char *tc_ide_fehler(int code) {
              "idle slots were freed automatically; TinyCUnload a running slot, or reboot";
     case -5: return "download rejected - too short, or not a .gz";
     case -6: return "cannot replace the old IDE (rename failed)";
-    case -7: return "write incomplete - the partition is probably full. "
-                    "Delete /tinyc_ide.html.gz and run TinyCIde again";
+    case -7: {
+      // The numbers decide what to say: "full" only when it really is (it was said every time before, although the SD card of
+      // a fresh device had 15 GB free: Andreas, 19.10.2026).
+      static char m[200];
+      if (tc_ide_diag.free_kb < (uint32_t)(tc_ide_diag.written / 1024) + 8) {
+        snprintf_P(m, sizeof(m), PSTR("the partition is full (%u kB free). Delete /tinyc_ide.html.gz and run TinyCIde again"),
+                   (unsigned)tc_ide_diag.free_kb);
+      } else {
+        snprintf_P(m, sizeof(m), PSTR("writing was cut short (%u of %d bytes on disk, %u kB free) - try again, "
+                   "or upload tinyc_ide.html.gz to port 83"), (unsigned)tc_ide_diag.on_disk, tc_ide_diag.written,
+                   (unsigned)tc_ide_diag.free_kb);
+      }
+      return m;
+    }
     default: return "unknown error";
   }
 }
@@ -3952,9 +3983,18 @@ void CmndTinyCIde(void) {
     strlcpy(url, TINYC_DEFAULT_IDE_URL, sizeof(url));
   }
   int n = tc_fetch_ide(url);
-  if (n > 0) { Response_P(PSTR("{\"TinyCIde\":{\"updated\":%d}}"), n); }
-  else       { Response_P(PSTR("{\"TinyCIde\":{\"error\":%d,\"msg\":\"%s\"}}"),
-                          n, tc_ide_fehler(n)); }
+  if (n > 0) { Response_P(PSTR("{\"TinyCIde\":{\"updated\":%d,\"flash\":%d}}"), n, tc_ide_diag.in_flash ? 1 : 0); }
+  else {
+    // "kept" = there is an IDE left that the failed update did not touch (the page used to claim that every time)
+    bool kept = false;
+    FS *fl[2] = { ufsp, (ffsp && ffsp != ufsp) ? ffsp : nullptr };
+    for (int i = 0; i < 2; i++) {
+      if (!fl[i]) continue;
+      File k = fl[i]->open("/tinyc_ide.html.gz", "r");
+      if (k) { if (k.size() >= 1000) { kept = true; } k.close(); }
+    }
+    Response_P(PSTR("{\"TinyCIde\":{\"error\":%d,\"kept\":%d,\"msg\":\"%s\"}}"), n, kept ? 1 : 0, tc_ide_fehler(n));
+  }
 #else
   ResponseCmndChar_P(PSTR("no filesystem"));
 #endif
