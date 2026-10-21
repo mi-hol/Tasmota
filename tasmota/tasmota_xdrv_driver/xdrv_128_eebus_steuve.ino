@@ -6,6 +6,7 @@
   sie nach aussen (Tasmota-Ereignis/Befehl), damit z. B. ein Skript Verbraucher schaltet.
 
   Abgeleitet aus xdrv_126_eebus_guard.ino v184 (Steuerbox). Eigene Versionszaehlung ab SteuVE v001.
+  SteuVE v017 (21.10.2026): eingehende Verbindung auch ueber die AccessMethods-Kennung der SKI zuordnen (wie Steuerbox v188).
   SHIP/TLS/Discovery/Herzschlag/Wiederaufbau sind die bewaehrten Teile der Steuerbox; die
   Steuerbox-Funktionen (Rolle 1, EEBusLpc/EEBusLpp usw.) sind vorerst noch enthalten.
   NICHT zusammen mit xdrv_126 einbauen (gleiche Funktionsnamen) — der Build bricht dann ab.
@@ -7145,6 +7146,30 @@ void EebusSrvLinkConn(void) {
   AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s mit SPINE-Slot %d verknuepft — Datenphase aktiv"), ESrv.peer_ip, ci);
 }
 
+// SteuVE v017 (21.10.): eingehende Verbindung ueber die AccessMethods-Kennung der echten SKI zuordnen, wenn die
+// Adresse nicht passte (wie Steuerbox v188). Anlass: ein Geraet mit ZWEI IPv6-Adressen ruft ueber eine andere an, als
+// der Scan gemerkt hat (ip6 = nur die erste) -> der Slot behielt die Pseudo-SKI (Adresse); damit fiele z. B. auch das
+// Vertrauen (EebusCsTrusted vergleicht die SKI) aus. Die Kennung (mDNS-TXT "id" = SHIP accessMethods.id) haengt
+// nicht an der Adresse.
+void EebusSrvSkiFromId(int ci, const char *pid) {   // Slotnummer statt EebusConn* - die Arduino-Vorab-
+   // Deklaration steht vor der Struct-Definition (Bau brach sonst mit 'EebusConn was not declared' ab)
+  if ((ci < 0) || (ci >= EEBUS_MAX_CONN)) { return; }
+  EebusConn *cc = &EConn[ci];
+  if ((nullptr == pid) || ('\0' == pid[0])) { return; }
+  if (40 == strlen(cc->peer_ski)) { return; }   // hat schon die echte SKI (aus der Adresse)
+  for (uint32_t k = 0; k < Eebus.peer_count; k++) {
+    if (Eebus.peers[k].id[0] && (0 == strcmp(Eebus.peers[k].id, pid))) {
+      strlcpy(cc->peer_ski, Eebus.peers[k].ski, sizeof(cc->peer_ski));
+      cc->peer_idx  = (int)k;
+      cc->peer_port = Eebus.peers[k].port;
+      EebusModeApply(cc->peer_ski);
+      EebusStatSet(cc->peer_ski, SHIP_CMI_OK, "");
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s ist SKI %s (ueber die Kennung %s)"), cc->peer_ip, cc->peer_ski, pid);
+      return;
+    }
+  }
+}
+
 // Etappe 3: SME-Handshake als SERVER (Geraet = SHIP-Client). Gespiegelt zum
 // Client-Pfad (EebusSmeDispatch): Hello beantworten -> announceMax des Geraets mit
 // "select" beantworten (Server waehlt Version, SHIP 13.4.4.2) -> Geraet spiegelt
@@ -7249,6 +7274,7 @@ void EebusSrvSmeHandle(int classifier, const char *json) {
     AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s AccessMethods id=%s"), ESrv.peer_ip, pid);
     if (ESrv.conn_idx >= 0) {   // Kennung in den SPINE-Slot uebernehmen
       strlcpy(EConn[ESrv.conn_idx].peer_id, pid, sizeof(EConn[ESrv.conn_idx].peer_id));
+      EebusSrvSkiFromId(ESrv.conn_idx, pid);   // SteuVE v017
     }
     return;
   }

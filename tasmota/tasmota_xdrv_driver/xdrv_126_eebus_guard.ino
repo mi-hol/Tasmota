@@ -460,6 +460,8 @@ static const uint16_t kEebusLateReadS[3] = { 60, 180, 420 };
 // 2 min danach wieder verbunden.
 static const uint16_t kEebusKaWaitS[6] = { 8, 15, 30, 60, 120, 120 };
 
+// v188 (21.10.): eingehende Verbindung zusaetzlich ueber die AccessMethods-Kennung der SKI zuordnen (EebusSrvSkiFromId),
+// wenn die Adresse nicht passt (Geraet mit mehreren IPv6-Adressen ruft ueber eine andere an, als der Scan gemerkt hat).
 // v187 (20.10.): Senden robust. (1) Frame in EINEM Puffer + EINEM write() statt 64-B-Stuecken (je ein TLS-Record).
 // (2) Geht ein Frame nur teilweise raus (Log v186: 3456 von 3622 B an die SteuVE, danach auch 0 B an den HEMS),
 // wird nichts mehr gesendet und in der Datenphase sauber abgebaut (EebusSendBroken, send_broken), statt mit
@@ -6092,6 +6094,30 @@ void EebusSrvLinkConn(void) {
   AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s mit SPINE-Slot %d verknuepft — Datenphase aktiv"), ESrv.peer_ip, ci);
 }
 
+// v188 (21.10.): eingehende Verbindung ueber die AccessMethods-Kennung der echten SKI zuordnen, wenn die
+// Adresse nicht passte. Anlass (Forum, Waermepumpe eines Testers): das Geraet hat ZWEI IPv6-Adressen (fd37:... und
+// 2a01:...), der Scan merkt sich nur die erste (ip6), angerufen wurde ueber die andere -> der Slot behielt die
+// Pseudo-SKI (Adresse), und die Seite fand die stehende Verbindung per SKI nicht ("keine stehende Verbindung mit
+// dieser SKI"). Die Kennung (mDNS-TXT "id" = SHIP accessMethods.id) haengt nicht an der Adresse.
+void EebusSrvSkiFromId(int ci, const char *pid) {   // Slotnummer statt EebusConn* - die Arduino-Vorab-
+   // Deklaration steht vor der Struct-Definition (Bau brach sonst mit 'EebusConn was not declared' ab)
+  if ((ci < 0) || (ci >= EEBUS_MAX_CONN)) { return; }
+  EebusConn *cc = &EConn[ci];
+  if ((nullptr == pid) || ('\0' == pid[0])) { return; }
+  if (40 == strlen(cc->peer_ski)) { return; }   // hat schon die echte SKI (aus der Adresse)
+  for (uint32_t k = 0; k < Eebus.peer_count; k++) {
+    if (Eebus.peers[k].id[0] && (0 == strcmp(Eebus.peers[k].id, pid))) {
+      strlcpy(cc->peer_ski, Eebus.peers[k].ski, sizeof(cc->peer_ski));
+      cc->peer_idx  = (int)k;
+      cc->peer_port = Eebus.peers[k].port;
+      EebusModeApply(cc->peer_ski);
+      EebusStatSet(cc->peer_ski, SHIP_CMI_OK, "");
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s ist SKI %s (ueber die Kennung %s)"), cc->peer_ip, cc->peer_ski, pid);
+      return;
+    }
+  }
+}
+
 // Etappe 3: SME-Handshake als SERVER (Geraet = SHIP-Client). Gespiegelt zum
 // Client-Pfad (EebusSmeDispatch): Hello beantworten -> announceMax des Geraets mit
 // "select" beantworten (Server waehlt Version, SHIP 13.4.4.2) -> Geraet spiegelt
@@ -6196,6 +6222,7 @@ void EebusSrvSmeHandle(int classifier, const char *json) {
     AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s AccessMethods id=%s"), ESrv.peer_ip, pid);
     if (ESrv.conn_idx >= 0) {   // Kennung in den SPINE-Slot uebernehmen
       strlcpy(EConn[ESrv.conn_idx].peer_id, pid, sizeof(EConn[ESrv.conn_idx].peer_id));
+      EebusSrvSkiFromId(ESrv.conn_idx, pid);   // v188
     }
     return;
   }
