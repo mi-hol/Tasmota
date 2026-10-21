@@ -369,7 +369,7 @@ log "Recreating GitHub release '$RELEASE_TAG' on $RELEASE_REPO (tag -> $RELEASE_
 # (Plain string list — macOS ships bash 3.2, no associative arrays.)
 SEEN_LIST=" "
 UPLOAD_ASSETS=()
-for f in "$STAGE_DIR"/*.bin "$STAGE_DIR"/*.bin.gz "$STAGE_DIR"/*.gz "$STAGE_DIR"/*.md; do
+for f in "$STAGE_DIR"/*.bin "$STAGE_DIR"/*.bin.gz "$STAGE_DIR"/*.gz "$STAGE_DIR"/*.md "$STAGE_DIR"/*.html; do   # *.html: steuerbox.html / steuve.html (EEBUS images)
   [[ -f "$f" ]] || continue
   base="$(basename "$f")"
   case "$base" in
