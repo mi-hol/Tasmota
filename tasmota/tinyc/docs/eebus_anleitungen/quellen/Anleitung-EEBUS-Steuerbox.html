@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="author" content="meierchen006 mit Hilfe von Claude">
+<title>Anleitung EEBUS-Steuerbox</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 10.5pt; line-height: 1.45; color: #1d1d1d; }
+  h1 { font-size: 20pt; margin: 0 0 4mm; color: #1d3f6e; }
+  h2 { font-size: 13.5pt; margin: 7mm 0 2mm; color: #1d3f6e; border-bottom: 1px solid #c9d3e0; padding-bottom: 1mm; page-break-after: avoid; }
+  h3 { font-size: 11pt; margin: 4mm 0 1mm; page-break-after: avoid; }
+  p, li { margin: 1mm 0; }
+  .hinweis { background: #fff6dc; border-left: 4px solid #e0a800; padding: 2mm 3mm; margin: 3mm 0; }
+  .warn { background: #fde7e7; border-left: 4px solid #c43c3c; padding: 2mm 3mm; margin: 3mm 0; }
+  .info { background: #eaf2fb; border-left: 4px solid #3c7cc4; padding: 2mm 3mm; margin: 3mm 0; }
+  figure { margin: 3mm 0 4mm; page-break-inside: avoid; }
+  figure img { width: 100%; border: 1px solid #b9c2cf; border-radius: 2mm; }
+  figcaption { font-size: 9pt; color: #555; margin-top: 1mm; }
+  table { border-collapse: collapse; width: 100%; margin: 2mm 0; font-size: 9.5pt; page-break-inside: avoid; }
+  th, td { border: 1px solid #c9d3e0; padding: 1.2mm 2mm; line-height: 1.6; text-align: left; vertical-align: top; }
+  th { background: #eef2f7; }
+  code { font-family: Consolas, monospace; font-size: 9.5pt; background: #f1f3f5; padding: 0 1mm; border-radius: 1mm; }
+  .kopf { font-size: 9pt; color: #777; margin-bottom: 6mm; }
+  .seite { page-break-before: always; }
+</style>
+</head>
+<body>
+
+<h1>EEBUS-Steuerbox auf Tasmota</h1>
+<div class="kopf">Bedienungsanleitung · Stand 21.10.2026 · Treiber <code>xdrv_126</code> v187 · Persönliche Daten in den Bildern unkenntlich gemacht<br>Erstellt von <b>meierchen006</b> mit Hilfe von Claude</div>
+
+<div class="warn"><b>Testgerät, nicht zertifiziert.</b> Die Steuerbox dient dazu, die EEBUS-Kommunikation mit einem HEMS (Energiemanagementsystem im Haus) oder mit einer steuerbaren Verbrauchseinrichtung zu prüfen. Sie ersetzt weder die Steuerbox des Messstellenbetreibers noch ein geprüftes Gerät nach § 14a EnWG und ist nicht für den regulären Betrieb gedacht.</div>
+
+<h2>1. Was die Steuerbox macht</h2>
+<p>Die Steuerbox spielt die Rolle, die sonst die Steuerbox des Netzbetreibers am Smart-Meter-Gateway übernimmt. Sie schickt per EEBUS zwei Arten von Vorgaben:</p>
+<ul>
+  <li><b>§ 14a EnWG – Bezugsbegrenzung (LPC):</b> wie viel Leistung steuerbare Verbrauchseinrichtungen (Wärmepumpe, Wallbox, Speicher, Klimagerät) höchstens aus dem Netz beziehen dürfen. Grundlage: § 14a Abs. 1 EnWG mit BNetzA-Festlegung BK6-22-300.</li>
+  <li><b>§ 9 EEG – Einspeisebegrenzung (LPP):</b> wie viel die Erzeugungsanlage höchstens einspeisen darf.</li>
+</ul>
+<p>Gegenstelle ist entweder ein <b>HEMS</b>, das die Vorgabe auf seine Geräte verteilt, oder direkt ein <b>einzelnes Gerät</b> (Direktsteuerung, zum Beispiel ein Wärmepumpen-Gateway oder die <b>SteuVE</b>, eine steuerbare Verbrauchseinrichtung auf Tasmota mit eigener Anleitung).</p>
+<p>Die Box kann gleichzeitig mit einem HEMS und mit einem einzelnen Gerät verbunden sein. Verbindungen laufen über IPv4 oder IPv6; ruft eine Gegenstelle über IPv6 an, ordnet die Box sie anhand ihrer SKI dem gefundenen Gerät zu.</p>
+
+<h2>2. Seite aufrufen</h2>
+<p>Auf der Tasmota-Hauptseite der Box auf <b>„Steuerbox“</b> klicken. Die Seite liegt als Datei <code>steuerbox.html</code> im Dateisystem der Box (Flash oder SD).</p>
+<figure><img src="bilder-Steuerbox/01-tasmota-hauptseite.png"><figcaption>Bild 1 – Tasmota-Hauptseite mit dem Knopf „Steuerbox“.</figcaption></figure>
+<div class="hinweis">Zeigt die Seite „steuerbox.html liegt nicht im Dateisystem – bitte hochladen“, fehlt die Datei. Sie gehört ins Dateisystem der Box. Liegt sie nur auf der SD und wird trotzdem nicht gefunden, zusätzlich in den Flash legen.</div>
+
+<h2 class="seite">3. Eigene Identität und Gerät verbinden</h2>
+<figure><img src="bilder-Steuerbox/02-identitaet-und-geraet.png"><figcaption>Bild 2 – Eigene Identität, Geräteauswahl mit Verbindung zum HEMS, Struktur und Messwerte des Netzanschlusspunkts.</figcaption></figure>
+
+<h3>Eigene Identität</h3>
+<ul>
+  <li><b>SKI</b> – der Fingerabdruck des eigenen Zertifikats. Verdeckt; „zeigen“ blendet ihn nur in diesem Browser ein. Diese SKI muss man beim HEMS bzw. Gerät als vertrauenswürdig eintragen.</li>
+  <li><b>Kennung / Seriennummer</b> – werden aus der SKI abgeleitet.</li>
+  <li><b>Sichern</b> – lädt Zertifikat und Schlüssel als Datei herunter. <b>Vor jeder Neuerzeugung sichern.</b></li>
+  <li><b>Neue Identität …</b> – erzeugt ein neues Zertifikat.</li>
+</ul>
+<div class="warn"><b>Neue Identität = neue SKI.</b> Alle bestehenden Kopplungen verfallen; beim HEMS bzw. Gerät muss die neue SKI wieder als vertrauenswürdig eingetragen werden.</div>
+
+<h3>Gerät suchen und verbinden</h3>
+<ol>
+  <li><b>Scan</b> klicken – die Box sucht per mDNS alle EEBUS-Geräte im Netz.</li>
+  <li>Unter „Gefundene Geräte“ das Gerät wählen, zum Beispiel das HEMS. <b>Immer nach Name bzw. SKI wählen</b> – die Reihenfolge der Liste ändert sich bei jedem Scan.</li>
+  <li><b>Verbinden</b> klicken. Beim ersten Mal die SKI der Box beim HEMS bzw. Gerät als vertrauenswürdig bestätigen.</li>
+  <li>Steht „verbunden“ und unten „BESTAETIGT freigegeben“, ist die Kopplung fertig.</li>
+</ol>
+<div class="info"><b>Wiederaufbau:</b> Hat eine Verbindung einmal die Datenphase erreicht, merkt sich die Box die SKI der Gegenstelle. Nach einem Neustart sucht und verbindet sie dann <b>von selbst</b> wieder; ändert die Gegenstelle ihre IP, sucht sie neu. <b>Trennen</b> stoppt den Wiederaufbau bis zum nächsten Neustart, vergisst die Gegenstelle aber nicht (dafür: <code>EEBusAutoConn -1</code>).</div>
+
+<h3>Struktur &amp; Messwerte</h3>
+<p>Links die Selbstauskunft der Gegenstelle (Actors, Use Cases, Entities, Features), rechts die Live-Werte des Netzanschlusspunkts (Leistung, Zählerstände, Begrenzungsfaktor). Was die Gegenstelle nicht liefert, steht als „wird nicht geliefert“ da.</p>
+
+<h2 class="seite">4. § 14a EnWG – Bezugsbegrenzung (LPC)</h2>
+<figure><img src="bilder-Steuerbox/03-lpc-bezugsbegrenzung.png"><figcaption>Bild 3 – Reiter „§ 14a EnWG · Bezug (LPC)“.</figcaption></figure>
+<ol>
+  <li><b>Grenzwert [W]</b> eintragen – so viel dürfen die steuerbaren Verbrauchseinrichtungen zusammen noch beziehen. Hilfe dazu: „Grenzwert berechnen“ (Bild 4).</li>
+  <li><b>Dauer [s]</b> – 900 s = ¼ Stunde, 0 = unbefristet, höchstens 86 400 s. Nach Ablauf hebt sich die Grenze von selbst auf.</li>
+  <li><b>Begrenzung setzen</b> – schickt die Grenze. <b>Begrenzung aufheben</b> – gibt sofort frei.</li>
+  <li><b>Ist-Zustand</b> zeigt, was die Gegenstelle meldet (aktiv/nicht aktiv, Wert, Restzeit).</li>
+</ol>
+<p><b>Failsafe-Wert / Failsafe-Mindestdauer</b> gibt die Gegenstelle bzw. der Netzbetreiber vor; die Box zeigt sie nur an. Sie gelten, wenn die Verbindung zur Steuerbox abreißt.</p>
+<div class="hinweis">Ein HEMS übernimmt die Grenze meist erst nach einigen Sekunden und verteilt sie auf seine Geräte. Vor dem Ablesen etwa eine Minute warten.</div>
+
+<figure><img src="bilder-Steuerbox/04-grenzwert-rechner.png"><figcaption>Bild 4 – Grenzwert-Rechner: Leistung je Gerät in kW eintragen, „als Grenzwert übernehmen“.</figcaption></figure>
+<p>Der Rechner ermittelt den Mindest-Grenzwert nach der Formel der Festlegung BK6-22-300 (Anlage 1): Werte bis 4,2 kW zählen nicht mit, Wärmepumpen und Raumkühlung zählen je als <b>eine</b> Einrichtung, Ladepunkte und Speicher einzeln; dazu der Gleichzeitigkeitsfaktor. Der Rechner sendet nichts – erst „Begrenzung setzen“ schickt den Wert.</p>
+
+<h2 class="seite">5. § 9 EEG – Einspeisebegrenzung (LPP)</h2>
+<figure><img src="bilder-Steuerbox/05-lpp-einspeisebegrenzung.png"><figcaption>Bild 5 – Reiter „§ 9 EEG · Einspeisung (LPP)“.</figcaption></figure>
+<ul>
+  <li>Grenzwert als <b>positiven Betrag</b> in Watt eingeben – das Minuszeichen auf der Leitung setzt die Box selbst.</li>
+  <li>„Grenzwert aus Prozent-Vorgabe berechnen“ rechnet eine Prozent-Vorgabe des Netzbetreibers mit der Nennleistung der Erzeugung (von der Gegenstelle gemeldet) in Watt um.</li>
+  <li>Setzen, Aufheben, Dauer und Ist-Zustand wie bei LPC.</li>
+</ul>
+<div class="info">Manche HEMS rechnen die Einspeisegrenze intern in Prozent der Anlagenleistung um und zeigen in ihrem Ereignisprotokoll Prozent statt Watt.</div>
+
+<h3>Antwort des Geräts</h3>
+<p>Unten auf der Seite steht die letzte Antwort der Gegenstelle, zum Beispiel „BESTAETIGT freigegeben“ oder „BESTAETIGT aktiv 6888 W“. Eine Ablehnung steht ebenfalls dort.</p>
+
+<h2 class="seite">6. Befehle in der Tasmota-Konsole</h2>
+<p>Alles auf der Seite geht auch per Konsole (Tasmota-Hauptseite → Werkzeuge → Konsole). <code>&lt;ziel&gt;</code> ist eine SKI (oder ihr eindeutiger Anfang), <code>hm</code>/<code>auto</code> für die einzige stehende Verbindung, oder eine Nummer aus der Fundliste (nicht empfohlen, die Reihenfolge wechselt).</p>
+<table>
+  <tr><th>Befehl</th><th>Bedeutung</th></tr>
+  <tr><td><code>EEBusScan</code></td><td>mDNS-Suche nach EEBUS-Geräten (dauert etwa 1,5 s)</td></tr>
+  <tr><td><code>EEBusPeers</code></td><td>gefundene Geräte mit SKI, Typ, Adresse (<code>Ip</code>, bei IPv6 zusätzlich <code>Ip6</code>) und Betriebsart</td></tr>
+  <tr><td><code>EEBusConnect &lt;ski&gt;</code></td><td>Verbindung aufbauen; beim ersten Kontakt die SKI der Box bei der Gegenstelle bestätigen</td></tr>
+  <tr><td><code>EEBusDisconnect [ski]</code></td><td>Verbindung trennen; ohne Angabe alle</td></tr>
+  <tr><td><code>EEBusStatus</code></td><td>Verbindungen mit Handshake-Phase und letztem Ergebnis</td></tr>
+  <tr><td><code>EEBusLpc &lt;ziel&gt; &lt;watt&gt; [s]</code></td><td>§ 14a-Bezugsgrenze setzen, z. B. <code>EEBusLpc auto 4200 900</code></td></tr>
+  <tr><td><code>EEBusRelease &lt;ziel&gt;</code></td><td>Bezugsgrenze freigeben</td></tr>
+  <tr><td><code>EEBusReleaseAll</code></td><td>alle Bezugsgrenzen freigeben (nicht die Einspeisung)</td></tr>
+  <tr><td><code>EEBusLpp &lt;ziel&gt; &lt;watt&gt; [s]</code></td><td>§ 9-Einspeisegrenze setzen (Betrag angeben)</td></tr>
+  <tr><td><code>EEBusLppFrei &lt;ziel&gt;</code></td><td>Einspeisegrenze freigeben</td></tr>
+  <tr><td><code>EEBusCert</code><br><code>EEBusCert 2</code></td><td>eigene SKI anzeigen<br>Zertifikat neu erzeugen (Kopplungen verfallen!)</td></tr>
+  <tr><td><code>EEBusAutoConn</code><br><code>EEBusAutoConn -1</code></td><td>Zustand des Wiederaufbaus anzeigen<br>gemerkte Gegenstelle vergessen (kein Wiederaufbau mehr)</td></tr>
+  <tr><td><code>EEBusData</code></td><td>Ist-Zustände und Messwerte aller Verbindungen als JSON</td></tr>
+</table>
+
+<h2>7. Häufige Fragen</h2>
+<h3>Die Box findet ein Gerät, kann es aber nicht verbinden (<code>tls connect err=-1002</code>)</h3>
+<p>-1002 heißt: die TCP-Verbindung kommt nicht zustande, das Gerät nimmt auf diesem Port nicht an. Manche Geräte bauen die Verbindung nur selbst auf (eingehend). Dann die SKI der Box im Gerät als vertrauenswürdig eintragen und warten, bis das Gerät anruft.</p>
+<h3><code>tls connect err=296</code></h3>
+<p>Die Gegenstelle bricht den TLS-Aufbau ab, weil die Box ihr Zertifikat nicht mitschickt. Die Firmware braucht <code>USE_MQTT_CLIENT_CERT</code> und 24 KB Stapel (ab dem aktuellen Stand automatisch gesetzt).</p>
+<h3>Die Grenze ist gesetzt, aber das Gerät drosselt nicht</h3>
+<p>Ein Gerät drosselt nur, wenn es gerade mehr zieht als erlaubt. Liegt sein Verbrauch unter der Grenze, nimmt es sie an, ändert aber nichts. Bei einem HEMS zusätzlich prüfen, ob die Verbraucher dort gekoppelt sind.</p>
+<h3>Direktverbindung zur SteuVE: die SteuVE steht auf „autonom“</h3>
+<p>Die SteuVE bindet die Box erst als Energy Guard, wenn die erste Grenze kommt. Bis dahin zeigt sie „autonom“ – das ist so gewollt. Nach „Begrenzung setzen“ wechselt sie auf „gesteuert“.</p>
+<h3>Im Log steht „WS-SENDEN UNVOLLSTAENDIG“</h3>
+<p>Eine Nachricht ging nur teilweise an die Gegenstelle. Die Box baut diese Verbindung dann ab und verbindet neu, statt mit einem beschädigten Datenstrom weiterzuarbeiten. Kommt das häufig vor, WLAN-Empfang bzw. Netzwerk der Gegenstelle prüfen.</p>
+<h3>Zwei Geräte mit derselben Identität</h3>
+<p>Nie zwei Boxen mit demselben Zertifikat gleichzeitig betreiben – die Gegenstelle kann sie nicht unterscheiden.</p>
+
+</body>
+</html>

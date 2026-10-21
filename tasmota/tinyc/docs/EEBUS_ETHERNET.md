@@ -19,6 +19,8 @@ Matter or LVGL — the TLS/SHIP handshake needs the heap. No Wi-Fi credentials a
 
 For a Steuerbox and a SteuVE you need **two devices**.
 
+**Illustrated manuals (German, PDF; addresses and identifiers blacked out)** by Andreas: [SteuVE](eebus_anleitungen/ANLEITUNG-SteuVE.pdf) (driver v016, script `steuve` v010) and [Steuerbox](eebus_anleitungen/ANLEITUNG-EEBUS-Steuerbox.pdf) (v187). HTML sources with the images: [`eebus_anleitungen/quellen/`](eebus_anleitungen/quellen/).
+
 ### Set up
 
 1. **Flash.** New device: `.factory.bin` with esptool or a web installer. Device that already runs Tasmota: upload the
@@ -94,6 +96,8 @@ Beide enthalten TinyC, Ethernet (Vorgabe `EthType 8` = W5500) und den EEBUS-Trei
 Matter und kein LVGL — der TLS/SHIP-Aufbau braucht den Heap. WLAN-Zugangsdaten sind nicht eingebaut.
 
 Für Steuerbox und SteuVE braucht man **zwei Geräte**.
+
+**Bebilderte Bedienungsanleitungen (PDF, Adressen und Kennungen unkenntlich)** von Andreas: [SteuVE](eebus_anleitungen/ANLEITUNG-SteuVE.pdf) (Treiber v016, Skript `steuve` v010) und [Steuerbox](eebus_anleitungen/ANLEITUNG-EEBUS-Steuerbox.pdf) (v187). HTML-Quellen mit den Bildern: [`eebus_anleitungen/quellen/`](eebus_anleitungen/quellen/).
 
 ### Einrichten
 
