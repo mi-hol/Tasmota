@@ -129,14 +129,14 @@ pre{background:var(--surface-2);border:1px solid var(--ring);border-radius:6px;p
     <h1>SteuVE</h1>
     <div class="sub" id="sub">—</div>
   </div>
-  <div style="display:flex;gap:8px;align-items:center"><a class="btn tas" href="/">&#8592; Tasmota</a><button class="btn" id="theme">Hell / Dunkel</button></div>
+  <div style="display:flex;gap:8px;align-items:center"><a class="btn tas" href="/">&#8592; Tasmota</a><a class="btn" href="/tc" title="TinyC-Seite: Slots, Laden, IDE-Update">TinyC</a><a class="btn" href="/ide" target="_blank" title="TinyC-IDE auf Port 82" onclick="this.href='http://'+location.hostname+':82/ide'">TinyC-IDE</a><button class="btn" id="theme">Hell / Dunkel</button></div>
 </header>
 
 <div class="chips" id="chips"></div>
 
 <nav class="tabs" role="tablist">
-  <button role="tab" data-t="dev">SteuVE</button>
   <button role="tab" data-t="ueb">Übersicht</button>
+  <button role="tab" data-t="dev">SteuVE</button>
   <button role="tab" data-t="shelly">Shellys</button>
   <button role="tab" data-t="hm">Meldungen</button>
   <button role="tab" data-t="prot">Protokoll</button>

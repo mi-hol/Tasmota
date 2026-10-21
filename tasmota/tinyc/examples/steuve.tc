@@ -1,5 +1,5 @@
 // @name: SteuVE Verbraucher
-// @version: 20261020_1136
+// @version: 20261020_1321
 // ─────────────────────────────────────────────────────────────────────
 // steuve_verbraucher.tc — schaltet Verbraucher (Shelly im WLAN/LAN) nach der §14a-Grenze, die der
 // Treiber xdrv_128 (steuerbare Verbrauchseinrichtung, Rolle 3) vom Energy Guard empfaengt.
@@ -44,6 +44,11 @@
 //   STVMODE 0|1|2                simulierte Abschaltung (s.o.)
 //   STVSIM <W> [s] | STVSIM 0    Grenze simulieren (ruft EEBusCsSim) — Test ohne Energy Guard
 //
+// v007 (20.10.2026): alle gaengigen Shelly-Arten. Gen2+ wird beim Erfragen nach Komponente unterschieden:
+//   Switch (schalten+messen), PM1 (PM Mini, nur messen), EM1 (Pro EM/EM Gen3, nur messen), EM (Pro 3EM, Summe,
+//   nur messen). Gen1: Relais+Meter wie bisher, EM/3EM (SHEM*) ueber /emeter/0..2 (Summe, nur messen).
+//   Reine Messgeraete werden nie geschaltet; beim Erkennen wird "abschaltbar" abgehakt. Antwortet ein als Switch
+//   gefuehrtes Geraet mit "No handler", wird es neu erfragt. Antwortpuffer 600 -> 1200 (EM.GetStatus ist lang).
 // v006 (20.10.2026): Nennleistung per tasmDefer statt tasmCmd, angestossen hoechstens einmal je Sekunde aus
 //   EverySecond() (tasmDefer hat nur EINEN Warteplatz fuer alle Slots und verwirft weitere still — mehrere STVSET
 //   kurz hintereinander duerfen ihn nicht ueberholen). STVSIM direkt per tasmDefer. TaskLoop wieder schlicht delay().
@@ -65,7 +70,8 @@ persist int cNenn[5];        // max. Nennleistung des tatsaechlichen Verbraucher
 persist int cFake[5];        // 1 = simuliert
 persist int cAbs[5];         // 1 = darf abgeschaltet werden
 persist int cProf[5];        // Testprofil 1..4
-persist int cTyp[5];         // 1 = Shelly Gen2 und neuer (RPC), 2 = Gen1; 0 = unbekannt -> wird erfragt
+persist int cTyp[5];         // 0 unbekannt (wird erfragt), 1 Gen2+ Switch, 2 Gen1 Relais+Meter,
+                             // 3 Gen2+ PM1, 4 Gen2+ EM1, 5 Gen2+ EM (3 Phasen), 6 Gen1 EM/3EM — ab 3 nur messen
 persist int cSimMode;        // simulierte Abschaltung 0/1/2
 persist char cName[90];      // Namen der Plaetze, mit | getrennt
 
@@ -105,7 +111,7 @@ int probeAll = 1;    // nach dem Start alle echten Plaetze einmal erfragen
 int melderFarbe = -1;   // zuletzt gesetzte Farbe (-1 = noch keine)
 int nennNeu = 0;        // v006: Nennleistung neu melden (vorgemerkt im Command, angestossen in EverySecond)
 char zustand[16] = "-";
-char resp[600];
+char resp[1200];
 char url[320];
 
 // ⚠️ Bewusst KEINE char[]-Parameter (TinyC: strlen/Index auf char[]-Parametern fehlerhaft) —
@@ -114,6 +120,13 @@ char gip[16];
 
 int belegt(int k) {
     return cIp[k * 4] > 0;
+}
+
+// v007: reine Messgeraete (PM1, EM1, EM, Gen1-EM) — werden nie geschaltet
+int nurMessen(int k) {
+    if (cFake[k] == 1) { return 0; }
+    if (cTyp[k] >= 3) { return 1; }
+    return 0;
 }
 
 int nennEff(int k) {
@@ -168,19 +181,41 @@ void probe(int k) {
     n = httpGet(url, resp);
     if (n <= 0) { strcpy(model[k], "antwortet nicht"); return; }
     if (jsonStr(resp, "gen", g) > 0) {
-        cTyp[k] = 1;
         if (jsonStr(resp, "app", m) <= 0) { jsonStr(resp, "model", m); }
         strSub(m2, m, 0, 14);
         sprintf(model[k], "%s Gen%s", m2, g);
+        // v007: Komponente bestimmen — erst Switch, dann PM1, EM1, EM
+        cTyp[k] = 0;
+        sprintf(url, "http://%s/rpc/Switch.GetStatus?id=0", gip);
+        n = httpGet(url, resp);
+        if (n > 0 && strFind(resp, "\"output\"") >= 0) { cTyp[k] = 1; }
+        if (cTyp[k] == 0) {
+            sprintf(url, "http://%s/rpc/PM1.GetStatus?id=0", gip);
+            n = httpGet(url, resp);
+            if (n > 0 && strFind(resp, "\"apower\"") >= 0) { cTyp[k] = 3; }
+        }
+        if (cTyp[k] == 0) {
+            sprintf(url, "http://%s/rpc/EM1.GetStatus?id=0", gip);
+            n = httpGet(url, resp);
+            if (n > 0 && strFind(resp, "\"act_power\"") >= 0) { cTyp[k] = 4; }
+        }
+        if (cTyp[k] == 0) {
+            sprintf(url, "http://%s/rpc/EM.GetStatus?id=0", gip);
+            n = httpGet(url, resp);
+            if (n > 0 && strFind(resp, "\"total_act_power\"") >= 0) { cTyp[k] = 5; }
+        }
+        if (cTyp[k] == 0) { strcpy(model[k], "Typ unbekannt"); }
     } else if (jsonStr(resp, "type", m) > 0) {
         cTyp[k] = 2;
+        if (strFind(m, "SHEM") == 0) { cTyp[k] = 6; }   // Gen1 EM / 3EM: nur messen
         strSub(m2, m, 0, 14);
         sprintf(model[k], "%s Gen1", m2);
     } else {
         cTyp[k] = 0;
         strcpy(model[k], "kein Shelly?");
     }
-    if (cTyp[k] != alt) { saveVars(); }   // Flash nur bei Aenderung beschreiben
+    if (cTyp[k] >= 3 && k != MELDER) { cAbs[k] = 0; }   // v007: Messgeraet -> nicht abschaltbar
+    if (cTyp[k] != alt) { saveVars(); nennNeu = 1; }   // Flash nur bei Aenderung beschreiben
 }
 
 // Leistung eines Platzes lesen. Liefert W oder -1.
@@ -196,9 +231,37 @@ int lies(int i) {
         sprintf(url, "http://%s/rpc/Switch.GetStatus?id=0", gip);
         n = httpGet(url, resp);
         if (n <= 0) { return -1; }
+        if (strFind(resp, "\"output\"") < 0) { cTyp[i] = 0; probeReq = i; return -1; }   // v007: kein Switch -> neu erfragen
         f = jsonNum(resp, "apower");
         if (strFind(resp, "\"output\":true") >= 0) { an[i] = 1; } else { an[i] = 0; }
         return (int)(f + 0.5);
+    }
+    if (cTyp[i] >= 3 && cTyp[i] <= 5) {   // v007: Gen2+ reine Messgeraete
+        if (cTyp[i] == 3) { sprintf(url, "http://%s/rpc/PM1.GetStatus?id=0", gip); }
+        if (cTyp[i] == 4) { sprintf(url, "http://%s/rpc/EM1.GetStatus?id=0", gip); }
+        if (cTyp[i] == 5) { sprintf(url, "http://%s/rpc/EM.GetStatus?id=0", gip); }
+        n = httpGet(url, resp);
+        if (n <= 0) { return -1; }
+        if (cTyp[i] == 3) { f = jsonNum(resp, "apower"); }
+        if (cTyp[i] == 4) { f = jsonNum(resp, "act_power"); }
+        if (cTyp[i] == 5) { f = jsonNum(resp, "total_act_power"); }
+        an[i] = 0;
+        if (f > 2) { an[i] = 1; }   // "an" = es fliesst Leistung (Messgeraet hat keinen Schalter)
+        return (int)(f + 0.5);
+    }
+    if (cTyp[i] == 6) {   // v007: Gen1 EM / 3EM — Summe der Kanaele
+        int ch;
+        int ok = 0;
+        float sum = 0;
+        for (ch = 0; ch < 3; ch++) {
+            sprintf(url, "http://%s/emeter/%d", gip, ch);
+            n = httpGet(url, resp);
+            if (n > 0 && strFind(resp, "\"power\"") >= 0) { sum = sum + jsonNum(resp, "power"); ok = 1; }
+        }
+        if (ok == 0) { return -1; }
+        an[i] = 0;
+        if (sum > 2) { an[i] = 1; }
+        return (int)(sum + 0.5);
     }
     if (cTyp[i] == 2) {
         char u2[48];
@@ -227,6 +290,7 @@ int schalte(int i, int ein) {
         an[i] = ein;
         return 1;
     }
+    if (nurMessen(i)) { return 0; }   // v007: Messgeraet hat keinen Schalter
     ipStr(i);
     if (cTyp[i] == 1) {
         if (ein == 1) { sprintf(url, "http://%s/rpc/Switch.Set?id=0&on=true", gip); }
@@ -400,7 +464,7 @@ void runde() {
             sicher = sicher + 1;
             int best = -1;
             for (i = NV - 1; i >= 0; i--) {
-                if (!belegt(i) || cAbs[i] != 1 || an[i] != 1 || p[i] <= 0 || versucht[i] == 1) { continue; }
+                if (!belegt(i) || cAbs[i] != 1 || nurMessen(i) || an[i] != 1 || p[i] <= 0 || versucht[i] == 1) { continue; }
                 best = i;
                 break;
             }
@@ -618,6 +682,6 @@ int main() {
     }
     nennMelden();
     addCommand("STV");
-    addLog("STV: SteuVE-Verbraucher v006 gestartet");
+    addLog("STV: SteuVE-Verbraucher v007 gestartet");
     return 0;
 }
