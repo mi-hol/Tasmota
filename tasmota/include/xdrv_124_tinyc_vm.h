@@ -1875,6 +1875,10 @@ struct TcSlot {
                                   // so its teardown-save can't read the already-freed heap and
                                   // write zeros over the .pvs's heap-persist arrays. Cleared
                                   // when tc_vm_load() installs a fresh VM.
+  bool     started;               // the program has run since it was loaded (TinyCStartVM). A program
+                                  // that was loaded but never started holds only its default values —
+                                  // saving those would overwrite the .pvs (IDE upload + stop, Andreas
+                                  // 21.10.2026). Cleared on every load, set in TinyCStartVM.
   bool     running;
   bool     autoexec;              // auto-run on boot
   bool     web_nocard;            // webCard(0) sets this — suppress this slot's main-page card frame (0 = carded)
@@ -22271,8 +22275,16 @@ static void TinyCStopVM(TcSlot *s) {
   tc_output_flush();
   tc_current_slot = nullptr;
 
-  // Auto-save persist variables before clearing VM
-  tc_persist_save(&s->vm);
+  // Auto-save persist variables before clearing VM — but only if the program ran since it was loaded.
+  // An IDE upload loads the new program without reading its .pvs, and the IDE sends a stop before
+  // "run": saving here wrote the program's DEFAULT values over the .pvs (also over one taken over
+  // from the previous version). Measured on the SteuVE, Andreas 21.10.2026.
+  if (s->started) {
+    tc_persist_save(&s->vm);
+  } else if (s->vm.persist_count > 0) {
+    AddLog(LOG_LEVEL_INFO, PSTR("TCC: persist not saved - %s was loaded but never started"), s->filename);
+  }
+  s->started = false;
 
   s->running = false;
   s->vm.running = false;
@@ -22420,6 +22432,7 @@ static bool TinyCStartVM(TcSlot *s) {
   TinyCSetPersistFile(s, s->filename);
   tc_persist_load(&s->vm, false);   // phase 0: global scalars
   tc_persist_load(&s->vm, true);    // phase 1: heap-persist arrays (pre-allocated above)
+  s->started = true;                // from here the VM holds the saved values — a stop may save them again
 
   // Register UDP global variables (V5: auto-update from packets)
   if (s->vm.udp_global_count > 0) {
