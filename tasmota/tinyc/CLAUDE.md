@@ -655,6 +655,10 @@ One-liner per group — full signatures in `TinyC_Reference.md §Built-in Functi
     three. Note what is due and send at most one command per second yourself (`steuve.tc` v006: `nennNeu` + `EverySecond()`).
     Even then another script on the same device can occupy the place in the same tick.
 
+28. **Reading a value from NESTED JSON with a bare key** — `jsonStr(resp, "Power", …)` only finds the top level. A Tasmota
+    `Status` answer is `{"Status":{"Power":…}}`: ask for the path with `#` (`"Status#Power"`, `"StatusSNS#ENERGY#Power"`).
+    Found by Andreas in `steuve.tc` v008 (21.10.2026): the relay count stayed empty and the device was not recognised.
+
 Tooling note: `legacy_misc/compile_cli.js` calls `compile()` **without** a getFile
 resolver, so `#include` lines are silently ignored — it cannot verify files like
 `sml_chart.tc`. Run `resolveIncludes(src, getFile)` from `idesrc/src/preprocessor.js`

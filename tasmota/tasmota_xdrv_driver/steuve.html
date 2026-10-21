@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
   steuve.html — Bedienseite der steuerbaren Verbrauchseinrichtung (Treiber xdrv_128, /steuve).
-  Aufbau nach Mockup v4/v5 (09.10.2026): Reiter SteuVE · Übersicht · Shellys · Protokoll · Test & Einstellungen.
+  Aufbau nach Mockup v4/v5 (09.10.2026): Reiter Übersicht · SteuVE · Verbraucher (bis 21.10. „Shellys“) · Meldungen · Protokoll · Test & Einstellungen.
   Verdrahtet gegen die Konsole des Geraets: fetch('/cm?cmnd=...').
     EEBusCs        Zustand, Grenze, Messwerte, Vertrauen, eigene SKI/Kennung (Treiber, SteuVE v006)
     EEBusStatus    Verbindungen          EEBusPeers / EEBusScan   Fundliste (mDNS)
     EEBusCsTrust   Vertrauen setzen/entziehen (genau ein Energy Guard)
     STVLIST        Messwerte je Platz (Skript steuve_verbraucher v003)
-    STVCFG/STVSET  Liste der Shellys lesen/speichern, STVPROBE Modell erfragen, STVMODE simulierte Abschaltung
+    STVCFG/STVSET  Liste der Verbraucher (Shelly/Tasmota) lesen/speichern, STVPROBE Modell erfragen, STVMODE simulierte Abschaltung
     EEBusCsMsg     Meldungen vom/an den Energy Guard (Ringspeicher im Treiber, SteuVE v009) — Reiter Meldungen
     EEBusCsSim     Grenze lokal simulieren — nur Inbetriebnahme
   Protokoll: /steuve_log.csv (vom Skript, minuetlich waehrend einer Begrenzung und 10 min danach).
@@ -137,7 +137,7 @@ pre{background:var(--surface-2);border:1px solid var(--ring);border-radius:6px;p
 <nav class="tabs" role="tablist">
   <button role="tab" data-t="ueb">Übersicht</button>
   <button role="tab" data-t="dev">SteuVE</button>
-  <button role="tab" data-t="shelly">Shellys</button>
+  <button role="tab" data-t="shelly">Verbraucher</button>
   <button role="tab" data-t="hm">Meldungen</button>
   <button role="tab" data-t="prot">Protokoll</button>
   <button role="tab" data-t="test">Test &amp; Einstellungen</button>
@@ -223,16 +223,16 @@ pre{background:var(--surface-2);border:1px solid var(--ring);border-radius:6px;p
   </table>
   <p class="note">Geschaltet werden nur Verbraucher, die gerade ziehen. Wieder eingeschaltet wird gestaffelt, einer je 60 s
     (schrittweise Rückkehr), und nur was die SteuVE selbst abgeschaltet hat — während einer Begrenzung frühestens nach 5 min
-    und nur, wenn der Verbraucher mit seiner Nennleistung (plus 200 W Reserve) unter die Grenze passt. Eintragen im Reiter Shellys.</p></div>
+    und nur, wenn der Verbraucher mit seiner Nennleistung (plus 200 W Reserve) unter die Grenze passt. Eintragen im Reiter Verbraucher.</p></div>
 </section>
 </div>
 
-<!-- ================= Shellys ================= -->
+<!-- ================= Verbraucher (Shelly/Tasmota) ================= -->
 <div class="pane" data-p="shelly">
 <section style="margin-top:0">
-  <h3>Shellys <span class="note">— Prio 1 wird zuletzt abgeschaltet, Prio 4 zuerst</span></h3>
+  <h3>Verbraucher <span class="note">— Shelly oder Tasmota · Prio 1 wird zuletzt abgeschaltet, Prio 4 zuerst</span></h3>
   <div class="card tblwrap"><table class="cfg">
-    <thead><tr><th>Prio</th><th>Fake</th><th>IP</th><th>Verbraucher</th><th>max. Nennleistung</th><th>abschaltbar</th><th>Shelly / Testprofil</th><th></th></tr></thead>
+    <thead><tr><th>Prio</th><th>Fake</th><th>IP</th><th>Verbraucher</th><th>max. Nennleistung</th><th>abschaltbar</th><th>Gerät / Testprofil</th><th></th></tr></thead>
     <tbody id="shtab"><tr><td colspan="8">—</td></tr></tbody>
   </table>
   <p class="note">Nennleistung = höchste Leistung des tatsächlichen Verbrauchers (Typenschild), leer = 3.680 W (16 A); die Summe
@@ -569,7 +569,7 @@ function drawFlow(){
              `<text x="${cx}" y="416" text-anchor="middle" fill="${x.stv ? '#ff8a80' : '#999'}" font-size="11">${x.fake ? 'Fake · ' : ''}${err ? 'antwortet nicht' : (x.stv ? 'aus · von SteuVE' : (aus ? 'aus' : 'an · Prio ' + x.prio))}</text>`;
   });
   if (!v.length) {
-    tiles = `<text x="360" y="395" text-anchor="middle" fill="#999" font-size="13">${VL === null ? 'Skript steuve_verbraucher nicht geladen' : 'keine Verbraucher eingetragen — Reiter Shellys'}</text>`;
+    tiles = `<text x="360" y="395" text-anchor="middle" fill="#999" font-size="13">${VL === null ? 'Skript steuve_verbraucher nicht geladen' : 'keine Verbraucher eingetragen — Reiter Verbraucher'}</text>`;
   }
   const ant = fs ? 'Failsafe: ' + W(c.Grenze) : (lim ? (sim ? 'Simulation: ' : 'Anteil SteuVE: ') + W(c.Grenze) : 'Anteil SteuVE: unbegrenzt');
   o.push(`<rect x="260" y="236" width="200" height="24" rx="12" fill="var(--surface-2)" stroke="var(--axis)"/>` +
@@ -607,10 +607,10 @@ function renderUeb(){
     return `<tr><td>${esc(x.nm)}</td><td>${ger}</td><td>${esc(x.ip)}</td><td>${W(x.nenn)}</td><td>${esc(x.prio)}</td>` +
            `<td>${err ? '?' : W(x.w)}</td><td>${x.stv ? '<span class="tag stv">von SteuVE aus</span>' : (x.an === 0 ? 'aus' : (x.an === 1 ? 'an' : '—'))}</td>` +
            `<td>${x.err ? (err ? 'nein' : 'Aussetzer ' + x.err) : 'ja'}</td></tr>`;
-  }).join('') : '<tr><td colspan="8">' + (VL === null ? 'Skript steuve_verbraucher nicht geladen' : 'keine Verbraucher eingetragen — Reiter Shellys') + '</td></tr>';
+  }).join('') : '<tr><td colspan="8">' + (VL === null ? 'Skript steuve_verbraucher nicht geladen' : 'keine Verbraucher eingetragen — Reiter Verbraucher') + '</td></tr>';
 }
 
-// ---- Reiter Shellys: Formular aus STVCFG, Speichern per STVSET (je Platz, mit Wiederholung)
+// ---- Reiter Verbraucher: Formular aus STVCFG, Speichern per STVSET (je Platz, mit Wiederholung)
 const RINGF = [['#37c871','grün · frei'],['#fab219','gelb · §14a begrenzt'],['#e05a4a','rot · Failsafe'],['#42a5f5','blau · ohne Energy Guard']];
 function profSel(v){ return '<select class="pf">' + [1,2,3,4].map(i => `<option value="${i}"${+v === i ? ' selected' : ''}>${PROF[i]}</option>`).join('') + '</select>'; }
 function zeileStatus(tr){
@@ -666,7 +666,7 @@ function renderShForm(){
       setTimeout(() => ladeCfg(!SHDIRTY).then(() => {
         const c = CFG && CFG.P.find(x => x[0] === pl), m = c ? c[8] : '';
         const nb = document.querySelector('.pr[data-pl="' + pl + '"]');
-        const ok = m && m !== 'antwortet nicht' && m !== 'kein Shelly?';
+        const ok = m && m !== 'antwortet nicht' && m !== 'kein Shelly?' && m !== 'kein Shelly/Tasmota?' && m !== 'Tasmota: Passwort?' && m !== 'Tasmota ohne Messung';
         knopfMeldung(nb, ok ? '✓ erkannt' : '✗ ' + (m || 'keine Antwort'), ok ? OK : ROT);
       }), 12000);
     });
@@ -834,7 +834,7 @@ function renderKopf(){
     chip(!c.Vertraut ? 'cr' : (sl && sl.Sme === 'done' ? 'ok' : 'wa'), '<b>Energy Guard</b> ' +
          (!c.Vertraut ? 'keiner vertraut' : esc((sl ? sl.Ip : '…' + c.Vertraut.slice(-4)) + (sl && sl.Sme === 'done' ? ' verbunden' : ' nicht verbunden')))) +
     chip(c.HerzschlagS < 0 ? 'wa' : (c.HerzschlagS < 120 ? 'ok' : 'cr'), '<b>Herzschlag</b> ' + (c.HerzschlagS < 0 ? 'noch keiner' : 'vor ' + dauer(c.HerzschlagS))) +
-    chip(VL === null ? 'wa' : (ok === v.length ? 'ok' : 'cr'), '<b>Shellys</b> ' + (VL === null ? 'Skript fehlt' : ok + '/' + v.length +
+    chip(VL === null ? 'wa' : (ok === v.length ? 'ok' : 'cr'), '<b>Verbraucher</b> ' + (VL === null ? 'Skript fehlt' : ok + '/' + v.length +
          (v.some(x => x.fake) ? ' · ' + v.filter(x => x.fake).length + ' Fake' : '')));
   if (c.Abgewiesen) { h += chip('wa', '<b>Abgewiesen</b> ' + c.Abgewiesen + ' (' + esc(c.AbgewiesenVon) + ')'); }
   if (LOGLAST) { h += chip('ok', '<b>Protokoll</b> ' + esc(LOGLAST)); }

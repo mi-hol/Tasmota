@@ -1,7 +1,7 @@
 // @name: SteuVE Verbraucher
-// @version: 20261020_1321
+// @version: 20261021_1027
 // ─────────────────────────────────────────────────────────────────────
-// steuve_verbraucher.tc — schaltet Verbraucher (Shelly im WLAN/LAN) nach der §14a-Grenze, die der
+// steuve_verbraucher.tc — schaltet Verbraucher (Shelly oder Tasmota im WLAN/LAN) nach der §14a-Grenze, die der
 // Treiber xdrv_128 (steuerbare Verbrauchseinrichtung, Rolle 3) vom Energy Guard empfaengt.
 //
 // Plaetze: 1..4 = Verbraucher (Platz = Prio; Prio 4 wird zuerst abgeschaltet, Prio 1 zuletzt),
@@ -44,6 +44,14 @@
 //   STVMODE 0|1|2                simulierte Abschaltung (s.o.)
 //   STVSIM <W> [s] | STVSIM 0    Grenze simulieren (ruft EEBusCsSim) — Test ohne Energy Guard
 //
+// v010 (21.10.2026): keine Funktionsaenderung — neue Fassung zum Test der .pvs-Uebernahme beim Laden ueber die IDE.
+// v009 (21.10.2026): Tasmota-Felder mit #-Pfad lesen (Status#Power, StatusSNS#ENERGY#Power) — v008 las "Power" ohne
+//   Pfad, fand nichts in der verschachtelten Antwort: Relais nicht erkannt (Typ 8 statt 7), Leistung 0.
+// v008 (21.10.2026): Tasmota-Geraete mit Energiemessung (Steckdosen, Leisten, Zaehler). Erkennen: antwortet ein
+//   Platz nicht als Shelly, wird /cm?cmnd=Status gefragt; Relaiszahl aus "Power" ("1", "0000" ...), Messung aus
+//   Status 10 (ENERGY). Typ 7 = Relais + Messung (schalten ueber Power0 = alle Relais, weil ein Messkreis die ganze
+//   Leiste misst), 8 = nur Messung, 9 = Tasmota ohne ENERGY (nicht nutzbar). Antwortet Tasmota mit "WARNING"
+//   (Web-Passwort gesetzt) oder leer (HTTP-API aus), gilt der Platz als nicht erreichbar.
 // v007 (20.10.2026): alle gaengigen Shelly-Arten. Gen2+ wird beim Erfragen nach Komponente unterschieden:
 //   Switch (schalten+messen), PM1 (PM Mini, nur messen), EM1 (Pro EM/EM Gen3, nur messen), EM (Pro 3EM, Summe,
 //   nur messen). Gen1: Relais+Meter wie bisher, EM/3EM (SHEM*) ueber /emeter/0..2 (Summe, nur messen).
@@ -71,7 +79,8 @@ persist int cFake[5];        // 1 = simuliert
 persist int cAbs[5];         // 1 = darf abgeschaltet werden
 persist int cProf[5];        // Testprofil 1..4
 persist int cTyp[5];         // 0 unbekannt (wird erfragt), 1 Gen2+ Switch, 2 Gen1 Relais+Meter,
-                             // 3 Gen2+ PM1, 4 Gen2+ EM1, 5 Gen2+ EM (3 Phasen), 6 Gen1 EM/3EM — ab 3 nur messen
+                             // 3 Gen2+ PM1, 4 Gen2+ EM1, 5 Gen2+ EM (3 Phasen), 6 Gen1 EM/3EM (3..6 nur messen),
+                             // v008: 7 Tasmota Relais+Messung, 8 Tasmota nur Messung, 9 Tasmota ohne Messung
 persist int cSimMode;        // simulierte Abschaltung 0/1/2
 persist char cName[90];      // Namen der Plaetze, mit | getrennt
 
@@ -122,11 +131,47 @@ int belegt(int k) {
     return cIp[k * 4] > 0;
 }
 
-// v007: reine Messgeraete (PM1, EM1, EM, Gen1-EM) — werden nie geschaltet
+// v007: reine Messgeraete (PM1, EM1, EM, Gen1-EM) — werden nie geschaltet; v008: Tasmota ohne Relais / ohne Messung
+int typNurMessen(int t) {
+    if (t >= 3 && t <= 6) { return 1; }
+    if (t == 8 || t == 9) { return 1; }
+    return 0;
+}
+
 int nurMessen(int k) {
     if (cFake[k] == 1) { return 0; }
-    if (cTyp[k] >= 3) { return 1; }
-    return 0;
+    return typNurMessen(cTyp[k]);
+}
+
+// v008: Tasmota fragen. Liefert 1, wenn es ein Tasmota ist (setzt dann cTyp und model).
+int probeTasmota(int k) {
+    char pw[12];
+    char m2[16];
+    int n;
+    int rel;
+    sprintf(url, "http://%s/cm?cmnd=Status", gip);
+    n = httpGet(url, resp);
+    if (n <= 0) { return 0; }
+    if (strFind(resp, "WARNING") >= 0) { cTyp[k] = 0; strcpy(model[k], "Tasmota: Passwort?"); return 1; }
+    if (strFind(resp, "\"Status\":{") < 0) { return 0; }
+    rel = 0;
+    if (jsonStr(resp, "Status#Power", pw) > 0) { rel = strlen(pw); }   // Pfad mit # (verschachtelt)
+    sprintf(url, "http://%s/cm?cmnd=Status%%2010", gip);
+    n = httpGet(url, resp);
+    if (n <= 0 || strFind(resp, "\"ENERGY\"") < 0) {
+        cTyp[k] = 9;
+        strcpy(model[k], "Tasmota ohne Messung");
+        return 1;
+    }
+    if (rel > 0) {
+        cTyp[k] = 7;
+        sprintf(m2, "%d Relais", rel);
+        sprintf(model[k], "Tasmota %s", m2);
+    } else {
+        cTyp[k] = 8;
+        strcpy(model[k], "Tasmota Messung");
+    }
+    return 1;
 }
 
 int nennEff(int k) {
@@ -179,8 +224,12 @@ void probe(int k) {
     ipStr(k);
     sprintf(url, "http://%s/shelly", gip);
     n = httpGet(url, resp);
-    if (n <= 0) { strcpy(model[k], "antwortet nicht"); return; }
-    if (jsonStr(resp, "gen", g) > 0) {
+    if (n <= 0 || (strFind(resp, "\"gen\"") < 0 && strFind(resp, "\"type\"") < 0)) {   // v008: kein Shelly -> Tasmota?
+        if (probeTasmota(k) == 0) {
+            cTyp[k] = 0;
+            if (n <= 0) { strcpy(model[k], "antwortet nicht"); } else { strcpy(model[k], "kein Shelly/Tasmota?"); }
+        }
+    } else if (jsonStr(resp, "gen", g) > 0) {
         if (jsonStr(resp, "app", m) <= 0) { jsonStr(resp, "model", m); }
         strSub(m2, m, 0, 14);
         sprintf(model[k], "%s Gen%s", m2, g);
@@ -212,9 +261,9 @@ void probe(int k) {
         sprintf(model[k], "%s Gen1", m2);
     } else {
         cTyp[k] = 0;
-        strcpy(model[k], "kein Shelly?");
+        strcpy(model[k], "kein Shelly/Tasmota?");
     }
-    if (cTyp[k] >= 3 && k != MELDER) { cAbs[k] = 0; }   // v007: Messgeraet -> nicht abschaltbar
+    if (typNurMessen(cTyp[k]) && k != MELDER) { cAbs[k] = 0; }   // v007/v008: Messgeraet -> nicht abschaltbar
     if (cTyp[k] != alt) { saveVars(); nennNeu = 1; }   // Flash nur bei Aenderung beschreiben
 }
 
@@ -263,6 +312,26 @@ int lies(int i) {
         if (sum > 2) { an[i] = 1; }
         return (int)(sum + 0.5);
     }
+    if (cTyp[i] == 7 || cTyp[i] == 8) {   // v008: Tasmota — Leistung aus Status 10, Schaltzustand aus Power0
+        char u2[48];
+        sprintf(u2, "http://%s/cm?cmnd=Power0", gip);   // vor dem ersten httpGet bauen
+        sprintf(url, "http://%s/cm?cmnd=Status%%2010", gip);
+        n = httpGet(url, resp);
+        if (n <= 0 || strFind(resp, "WARNING") >= 0) { return -1; }
+        if (strFind(resp, "\"ENERGY\"") < 0) { cTyp[i] = 0; probeReq = i; return -1; }   // Messung weg -> neu erfragen
+        f = jsonNum(resp, "StatusSNS#ENERGY#Power");   // Pfad mit # (verschachtelt)
+        if (cTyp[i] == 7) {
+            n = httpGet(u2, resp);
+            if (n > 0) {
+                if (strFind(resp, "\"ON\"") >= 0) { an[i] = 1; } else { an[i] = 0; }
+            }
+        } else {
+            an[i] = 0;
+            if (f > 2) { an[i] = 1; }
+        }
+        return (int)(f + 0.5);
+    }
+    if (cTyp[i] == 9) { return -1; }   // v008: Tasmota ohne Messung — nicht nutzbar
     if (cTyp[i] == 2) {
         char u2[48];
         sprintf(u2, "http://%s/meter/0", gip);   // vor dem ersten httpGet bauen
@@ -301,6 +370,12 @@ int schalte(int i, int ein) {
         if (ein == 1) { sprintf(url, "http://%s/relay/0?turn=on", gip); }
         else          { sprintf(url, "http://%s/relay/0?turn=off", gip); }
         n = httpGet(url, resp);
+    }
+    if (cTyp[i] == 7) {   // v008: Tasmota — alle Relais (der Messkreis misst die ganze Leiste)
+        if (ein == 1) { sprintf(url, "http://%s/cm?cmnd=Power0%%20On", gip); }
+        else          { sprintf(url, "http://%s/cm?cmnd=Power0%%20Off", gip); }
+        n = httpGet(url, resp);
+        if (n > 0 && strFind(resp, "POWER") < 0) { n = -1; }   // z. B. WARNING (Passwort) -> nicht geschaltet
     }
     if (n > 0) { an[i] = ein; return 1; }
     return 0;
@@ -682,6 +757,6 @@ int main() {
     }
     nennMelden();
     addCommand("STV");
-    addLog("STV: SteuVE-Verbraucher v007 gestartet");
+    addLog("STV: SteuVE-Verbraucher v010 gestartet");
     return 0;
 }
