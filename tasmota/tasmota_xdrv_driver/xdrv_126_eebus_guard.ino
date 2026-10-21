@@ -460,6 +460,18 @@ static const uint16_t kEebusLateReadS[3] = { 60, 180, 420 };
 // 2 min danach wieder verbunden.
 static const uint16_t kEebusKaWaitS[6] = { 8, 15, 30, 60, 120, 120 };
 
+// v187 (20.10.): Senden robust. (1) Frame in EINEM Puffer + EINEM write() statt 64-B-Stuecken (je ein TLS-Record).
+// (2) Geht ein Frame nur teilweise raus (Log v186: 3456 von 3622 B an die SteuVE, danach auch 0 B an den HEMS),
+// wird nichts mehr gesendet und in der Datenphase sauber abgebaut (EebusSendBroken, send_broken), statt mit
+// abgeschnittenem Frame weiterzulaufen. Ursache der Blockade (beide Seiten senden, keine liest) behebt SteuVE v015.
+// v186 (20.10.): nur Diagnose, Verhalten unveraendert. Logzeile "WS-SENDEN UNVOLLSTAENDIG", wenn der TLS-Client
+// einen Kopf oder ein 64-B-Stueck nicht ganz annimmt (Frame bleibt abgeschnitten im Strom), und "SPINE-Senden
+// FEHLGESCHLAGEN" an der zentralen SPINE-Sendestelle (Ergebnis wurde bisher nicht ausgewertet). Anlass: Direkt-
+// verbindung zur SteuVE - deren Empfaenger las Text als WS-Kopf (49-B-"Fragmente", Schein-Close), Strom aus dem Takt.
+// v185 (20.10.): IPv6. Eine Gegenstelle rief ueber IPv6 an (fd37:...); peer_ip hatte 16 Zeichen und schnitt die
+// Adresse ab (auch die Pseudo-SKI eingehender Verbindungen). Jetzt 46 Zeichen. Der Scan merkt sich zusaetzlich
+// die erste IPv6 je Geraet (ip6), damit eine eingehende IPv6-Verbindung ihre echte SKI aus der Fundliste bekommt
+// (vorher nur IPv4 -> Seite und SKI-Auswahl fanden die Verbindung nicht). EEBusPeers zeigt "Ip6".
 // v184 (08.10.): limitId beider Richtungen aus EINER Beschreibung merken (lpc_lid_dir). Bisher loeschte
 // ein Richtungswechsel die limitId, und die Anmeldung der Einspeisung las Beschreibung, Ist-Werte und
 // Geraetekonfiguration noch einmal, die das Onboarding Sekunden vorher gelesen hatte.
@@ -528,6 +540,7 @@ typedef struct {
   char cat[12];   // TXT "cat" — DeviceCategory (z.B. "1"=GridConnectionHub); "" = nicht gesetzt
   char reg[8];   // TXT "register" — "true"/"false" (Auto-Accept-Flag nach SHIP 7.3.2)
   char ip[16];   // erste IPv4
+  char ip6[46];  // v185: erste IPv6 (eingehende IPv6-Verbindungen der echten SKI zuordnen)
   char host[33];   // mDNS-Hostname
   uint16_t port;
 } EebusPeer;
@@ -1052,10 +1065,14 @@ void EebusPollScan(void) {
       }
       if (cur->hostname) { strlcpy(p->host, cur->hostname, sizeof(p->host)); }
       p->port = cur->port;
-      for (mdns_ip_addr_t *a = cur->addr; a; a = a->next) {   // erste IPv4 reicht
-        if (ESP_IPADDR_TYPE_V4 == a->addr.type) {
+      p->ip[0] = ' '; p->ip6[0] = ' ';
+      for (mdns_ip_addr_t *a = cur->addr; a; a = a->next) {   // erste IPv4 und erste IPv6
+        if ((ESP_IPADDR_TYPE_V4 == a->addr.type) && (' ' == p->ip[0])) {
           strlcpy(p->ip, IPAddress(a->addr.u_addr.ip4.addr).toString().c_str(), sizeof(p->ip));
-          break;
+        }
+        if ((ESP_IPADDR_TYPE_V6 == a->addr.type) && (' ' == p->ip6[0])) {   // v185
+          IPAddress a6(IPv6, (const uint8_t *)a->addr.u_addr.ip6.addr);   // gleiche Schreibweise wie remoteIP()
+          strlcpy(p->ip6, a6.toString().c_str(), sizeof(p->ip6));
         }
       }
    // SKI ist die Identitaet — ohne SKI ist der Eintrag fuer uns wertlos (SHIP 7.3.2 Pflichtfeld)
@@ -1108,11 +1125,11 @@ void EebusResponsePeers(const char *label) {
     const char *src = (pz >= 0) ? "zuordnung" : ((pm >= 0) ? "typ" : "global");
     ResponseAppend_P(PSTR("%s{\"Ski\":\"%s\",\"Id\":\"%s\",\"Model\":\"%s\",\"Brand\":\"%s\","
                           "\"Type\":\"%s\",\"Cat\":\"%s\",\"Register\":\"%s\","
-                          "\"Ip\":\"%s\",\"Host\":\"%s\",\"Port\":%d,\"Path\":\"%s\","
+                          "\"Ip\":\"%s\",\"Ip6\":\"%s\",\"Host\":\"%s\",\"Port\":%d,\"Path\":\"%s\","
                           "\"Mode\":\"%s\",\"ModeSrc\":\"%s\"}"),
                      (i) ? "," : "", p->ski, p->id, p->model, p->brand,
                      p->type, (p->cat[0]) ? p->cat : "", (p->reg[0]) ? p->reg : "",
-                     p->ip, p->host, p->port, p->path,
+                     p->ip, p->ip6, p->host, p->port, p->path,
                      (pm < 0) ? "-" : (pm ? "hems" : "steuve"), src);
   }
   ResponseAppend_P(PSTR("]}}"));
@@ -1252,7 +1269,7 @@ typedef struct {
   bool     active = false;
   uint8_t  state = SHIP_IDLE;
   char     peer_ski[41] = { 0 };   // Peer-Identitaet (aus mDNS; BearSSL-Light gibt Peer-Cert nicht her)
-  char     peer_ip[16] = { 0 };
+  char     peer_ip[46] = { 0 };   // v185: 46 statt 16 — IPv6
   uint16_t peer_port = 0;
   char     err[80] = { 0 };
    // M2b: SME-Handshake (asynchron)
@@ -1367,6 +1384,7 @@ typedef struct {
   long     lim_dur_s[2]  = { -1, -1 };   // Restlaufzeit in s bei Empfang; -1 = keine Dauer bekannt
   uint32_t lim_dur_at[2] = { 0, 0 };   // millis() des Empfangs
   bool     teardown = false;   // Client-Freigabe steht an (verzoegert, NIE aus dem Callback)
+  bool     send_broken = false;   // v187: ein Frame ging nur teilweise raus -> nichts mehr senden, Abbau laeuft
   uint32_t hb_counter = 1;   // DeviceDiagnosis-Heartbeat-Zaehler
   uint32_t hb_next = 0;   // millis()-Zeitpunkt des naechsten Heartbeat-Sendens
   bool     peer_subscribed = false; // hat der Peer unser NodeManagement abonniert?
@@ -1607,12 +1625,33 @@ int EebusStreamRead(uint8_t *buf, size_t n, uint32_t timeout_ms) {
   return (int)got;
 }
 
-// Einen WS-Client-Frame senden (FIN, maskiert — RFC 6455). Beliebige Laenge (16-/64-bit),
-// die Nutzlast wird in kleinen maskierten Bloecken gesendet -> kein grosser Puffer noetig.
+// v187: Ein Frame ging nur teilweise raus. Der Strom ist damit kaputt — jedes weitere Byte liest die
+// Gegenstelle an der falschen Stelle (Befund 20.10.: SteuVE las Text als WS-Kopf, Schein-Close). Nichts
+// mehr senden, in der Datenphase sauber abbauen; der Keep-Alive (ausgehend) bzw. die Gegenstelle
+// (eingehend) baut neu auf. Waehrend des Handshakes bleibt es bei EebusSmeFail des Aufrufers.
+void EebusSendBroken(void) {
+  ESp->send_broken = true;
+  if (SME_DONE != ESp->sme) { return; }
+  AddLog(LOG_LEVEL_INFO, PSTR("EBG: *** Senden an %s abgebrochen - Verbindung wird abgebaut und neu aufgebaut ***"),
+         ESp->peer_ip);
+  EebusStatSet(ESp->peer_ski, SHIP_CMI_OK, "");
+  ESp->sme = SME_OFF;
+  ESp->state = SHIP_IDLE;
+  ESp->last_rx = 0;
+  if (!ESp->via_srv && ESp->keepalive && (ESp->peer_idx >= 0)) { ESp->reconnect_at = millis() + EebusKaWaitMs(); }
+  EebusTeardownLater();
+}
+
+// Einen WS-Client-Frame senden (FIN, maskiert — RFC 6455). Beliebige Laenge (16-/64-bit).
+// v187: Kopf + maskierte Nutzlast in EINEM Puffer, EIN write() (der TLS-Client teilt selbst in Records
+// <= 1024 B). Bis v186 je 64 B ein eigenes write() = eigener TLS-Record (3,6 KB -> 57 Records).
 // opcode: 0x2=binary (SHIP/SPINE), 0xA=Pong.
 bool EebusWsSendOp(const uint8_t *payload, size_t len, uint8_t opcode) {
+  if (ESp->send_broken) { return false; }   // v187: Strom kaputt, Abbau laeuft
   if (ESp->via_srv) {   // Slot einer EINGEHENDEN Verbindung -> Server-Sendepfad
-    return EebusSrvWsSendOp(payload, len, opcode);   // (unmaskiert, ueber die BearSSL-Server-Engine)
+    bool ok = EebusSrvWsSendOp(payload, len, opcode);   // (unmaskiert, ueber die BearSSL-Server-Engine)
+    if (!ok) { EebusSendBroken(); }   // v187
+    return ok;
   }
   if (!ESp->client) { return false; }
   uint8_t hdr[14];
@@ -1634,13 +1673,43 @@ bool EebusWsSendOp(const uint8_t *payload, size_t len, uint8_t opcode) {
   for (int i = 0; i < 4; i++) { mask[i] = (uint8_t)random(256); }   // Maske: nicht sicherheitsrelevant
   memcpy(hdr + hl, mask, 4);
   hl += 4;
-  if (hl != ESp->client->write(hdr, hl)) { return false; }
+  size_t tot = hl + len;
+  uint8_t small[256];   // kleine Frames (Herzschlag, Control) auf dem Stack
+  uint8_t *fb = (tot <= sizeof(small)) ? small : (uint8_t*)special_malloc(tot);
+  if (nullptr != fb) {   // v187: ganzer Frame in einem Stueck
+    memcpy(fb, hdr, hl);
+    for (size_t i = 0; i < len; i++) { fb[hl + i] = payload[i] ^ mask[i & 3]; }
+    size_t wt = ESp->client->write(fb, tot);
+    if (fb != small) { free(fb); }
+    if (len > 200) { EebusHeapCheckN("wsop_done", (uint32_t)len); }
+    if (wt != tot) {
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: WS-SENDEN UNVOLLSTAENDIG @ %s: %u von %u B (op %u) - Frame abgeschnitten"),
+             ESp->peer_ip, (uint32_t)wt, (uint32_t)tot, opcode);
+      EebusSendBroken();
+      return false;
+    }
+    return true;
+  }
+   // Rueckfall (kein Speicher fuer den grossen Puffer): wie bis v186 stueckweise
+  size_t w = ESp->client->write(hdr, hl);
+  if (hl != w) {   // v186: melden; v187: abbauen
+    AddLog(LOG_LEVEL_INFO, PSTR("EBG: WS-SENDEN UNVOLLSTAENDIG @ %s: Kopf %u von %u B (Frame %u B, op %u)"),
+           ESp->peer_ip, (uint32_t)w, (uint32_t)hl, (uint32_t)len, opcode);
+    EebusSendBroken();
+    return false;
+  }
   if (len > 200) { EebusHeapCheckN("wsop_hdr", (uint32_t)len); }   // nur grosse Sendungen pruefen
   uint8_t chunk[64];   // Nutzlast blockweise maskieren + senden (klein = stack-schonend)
   for (size_t off = 0; off < len; ) {
     size_t n = (len - off > sizeof(chunk)) ? sizeof(chunk) : (len - off);
     for (size_t i = 0; i < n; i++) { chunk[i] = payload[off + i] ^ mask[(off + i) & 3]; }
-    if (n != ESp->client->write(chunk, n)) { return false; }
+    w = ESp->client->write(chunk, n);
+    if (n != w) {   // v186: Frame bricht mitten in der Nutzlast ab -> Gegenstelle verliert den Takt
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: WS-SENDEN UNVOLLSTAENDIG @ %s: bei Byte %u von %u nur %u von %u B (op %u) - Frame abgeschnitten"),
+             ESp->peer_ip, (uint32_t)off, (uint32_t)len, (uint32_t)w, (uint32_t)n, opcode);
+      EebusSendBroken();   // v187
+      return false;
+    }
     off += n;
     if (len > 200) { EebusHeapCheckN("wsop_chunk", (uint32_t)off); }   // Byte-genaue Ortung
   }
@@ -1863,6 +1932,7 @@ bool EebusShipConnect(int idx) {
   ESp->client = new BearSSL::WiFiClientSecure_light(2048, 2048);
   if (nullptr == ESp->client) { strlcpy(ESp->err, "client new", sizeof(ESp->err)); goto fail; }
   ESp->active = true;
+  ESp->send_broken = false;   // v187: neue Verbindung, sauberer Strom
    // allowed_usages=alle; cert_issuer_key_type=BR_KEYTYPE_EC: unser Cert ist selbstsigniert
    // mit EC-Key -> muss EC sein (0 fuehrte zu handshake_failure, Cert nicht korrekt praesentiert)
   ESp->client->setClientECCert(ESp->br_cert, &ESp->br_key, 0xFFFF, BR_KEYTYPE_EC);
@@ -2250,7 +2320,10 @@ void EebusSpineSendAddr(const char *cmd_classifier, bool has_ref, uint32_t ref, 
     ESp->spine_ctr++, ref_frag, cmd_classifier, ack, cmd_json);
 
   EebusHeapCheckN("spine_format", (uint32_t)strlen(buf));   // nach snprintf ins Datagramm
-  EebusShipSendJson(buf, 2);
+  if (!EebusShipSendJson(buf, 2)) {   // v186: melden; den Abbau macht seit v187 EebusSendBroken
+    AddLog(LOG_LEVEL_INFO, PSTR("EBG: SPINE-Senden FEHLGESCHLAGEN @ %s (%s, %u B)"),
+           ESp->peer_ip, cmd_classifier, (uint32_t)strlen(buf));
+  }
   EebusHeapCheck("spine_aftersend");   // nach dem Senden, vor free
   free(buf);
   EebusHeapCheck("spine_freed");   // nach free des Datagramm-Puffers
@@ -5723,7 +5796,7 @@ typedef struct {
   br_x509_certificate br_cert[1];
   br_ec_private_key   br_key;
   uint32_t deadline = 0;   // millis()-Timeout der Verbindung
-  char     peer_ip[16] = { 0 };
+  char     peer_ip[46] = { 0 };   // v185: 46 statt 16 — IPv6
    // Etappe 2: WebSocket-Server + CMI
   uint8_t  ws_state = 0;   // 0=HTTP-Upgrade-Request sammeln, 1=WS aktiv (101 gesendet)
   bool     cmi_done = false;   // CMI [0,0] des Geraets beantwortet?
@@ -5994,6 +6067,7 @@ void EebusSrvLinkConn(void) {
   cc->lpc_result[0] = '\0';
   cc->keepalive = false;   // Wiederverbinden ist Sache des Geraets
   cc->teardown = false;
+  cc->send_broken = false;   // v187
   cc->reconnect_at = 0;
   cc->peer_idx = -1;
   cc->last_rx = millis();
@@ -6003,7 +6077,8 @@ void EebusSrvLinkConn(void) {
    // erkannt wird (Betriebsart HEMS/SteuVE, Anzeige, Wiederaufbau sieht die bestehende Verbindung).
    // Nicht in der Liste -> Pseudo-SKI bleibt, globaler Default gilt.
   for (uint32_t k = 0; k < Eebus.peer_count; k++) {
-    if (0 == strcmp(Eebus.peers[k].ip, ESrv.peer_ip)) {
+    if ((0 == strcmp(Eebus.peers[k].ip, ESrv.peer_ip)) ||
+        (Eebus.peers[k].ip6[0] && (0 == strcasecmp(Eebus.peers[k].ip6, ESrv.peer_ip)))) {   // v185: auch IPv6
       strlcpy(cc->peer_ski, Eebus.peers[k].ski, sizeof(cc->peer_ski));
       cc->peer_idx  = (int)k;
       cc->peer_port = Eebus.peers[k].port;

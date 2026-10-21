@@ -210,6 +210,7 @@
 #include <t_bearssl.h>   // BearSSL br_sha1 (korrekte SHA1; SHA1Builder lieferte falsche Hashes)
 #include <NetworkServer.h> // eingehender TCP-Listener (ESP32-Core, funktioniert ueber WiFi + Ethernet)
 #include <NetworkClient.h>
+#include <lwip/sockets.h>   // SteuVE v015: send(..., MSG_DONTWAIT) — Server-Senden ohne Blockieren
 // TLS-Transport: Tasmotas mbedTLS hat KEINE SSL-Schicht (mbedtls_ssl_* fehlen komplett),
 // Tasmota nutzt BearSSL. Wir verwenden denselben Client wie MQTT/AWS-IoT (Client-EC-Zertifikat).
 #include "WiFiClientSecureLightBearSSL.h"
@@ -304,7 +305,7 @@ bool     eebus_cs_lim_active = false;   // Grenze vom Energy Guard aktiv?
 uint32_t eebus_cs_lim_w      = 0;       // Wert der Grenze in W (auch bei inaktiv zuletzt gemeldet)
 long     eebus_cs_lim_dur_s  = -1;      // Geltungsdauer in s ab eebus_cs_lim_at, -1 = unbefristet
 uint32_t eebus_cs_lim_at     = 0;       // millis() der Uebernahme
-char     eebus_cs_lim_from[16] = "";    // IP des Energy Guard, der zuletzt geschrieben hat
+char     eebus_cs_lim_from[46] = "";    // IP des Energy Guard, der zuletzt geschrieben hat (SteuVE v016: IPv6)
 bool     eebus_cs_changed    = false;   // Zustand geaendert -> im naechsten Takt melden (nie im Empfangspfad)
 
 // SteuVE v002: Failsafe-Werte (vom Energy Guard geschrieben, im Flash gehalten) und Zustand der Einrichtung.
@@ -329,7 +330,7 @@ void EebusCsSetState(uint8_t s);        // SteuVE v002: Vorwaertsdeklaration (Au
 char     eebus_cs_trust[41]  = "";      // vertraute SKI (40 Hex, klein) oder leer
 bool     eebus_cs_trust_loaded = false;
 uint32_t eebus_cs_rej_cnt    = 0;       // abgewiesene Writes seit dem Start
-char     eebus_cs_rej_from[16] = "";    // IP des zuletzt abgewiesenen Absenders
+char     eebus_cs_rej_from[46] = "";    // IP des zuletzt abgewiesenen Absenders (SteuVE v016: IPv6)
 void EebusDisconnectNow(void);          // SteuVE v006: Vorwaertsdeklaration (EebusCsDropSki steht davor)
 // SteuVE v007: Kennung in Rolle 3. Bis v006 stellte sich die SteuVE wie eine Steuerbox vor
 // (ElectricitySupplySystem/cat 1/GridConnectionHub) — fuer den Energiemanager waere sie damit eine ZWEITE
@@ -674,6 +675,15 @@ static const uint16_t kEebusKaWaitS[6] = { 8, 15, 30, 60, 120, 120 };
 // fest wie eine Steuerbox — mDNS type/cat, Discovery deviceType/Entity und DestinationList.
 // SteuVE v008 (09.10.): Zustand in den Sensordaten (FUNC_JSON_APPEND, "EEBusCs":{Begrenzt,Grenze,Zustand,RestS,Leistung,Max})
 // — tasmCmd-Antworten kommen in TinyC leer an (ResponseClear in XdrvRulesProcess), das Skript liest per sensorGet.
+// SteuVE v016 (20.10.): IPv6 wie Steuerbox v185. peer_ip (EConn + ESrv) 16 -> 46 Zeichen (eine IPv6 wurde abgeschnitten,
+// ebenso die Pseudo-SKI eingehender Verbindungen); Scan merkt sich zusaetzlich die erste IPv6 je Geraet (ip6), damit
+// ein HEMS, das ueber IPv6 anruft, seine echte SKI aus der Fundliste bekommt; EEBusPeers zeigt "Ip6";
+// eebus_cs_lim_from/rej_from ebenfalls 46 Zeichen.
+// SteuVE v015 (20.10.): Empfang waehrend des eigenen Sendens (EebusSrvDrainRx -> sbuf, Parser via EebusSrvFlushSbuf).
+// Socket-Senden ohne Warten (send MSG_DONTWAIT statt NetworkClient::write, das per select bis ~10 s blockierte),
+// Annehmen in JEDER Senderunde vor dem Schreiben, Abbruch erst nach 5 s ohne Fortschritt.
+// Direktverbindung zur Steuerbox: beide schickten gleichzeitig ihre Discovery, keine las -> gegenseitige Blockade,
+// Steuerbox schnitt ihre Nachricht bei Byte 3456 von 3622 ab (Log v186), SteuVE las danach Text als WS-Kopf.
 // SteuVE v014 (09.10.): Grenzbeschreibung limitType signDependentAbsValueLimit (statt maxValueLimit) wie LPC/Ladestation.
 // SteuVE v013 (09.10.): Use Cases in Rolle 3 wie die Waermepumpe: ControllableSystem/LPC + MonitoredUnit/MPC (statt
 // MonitoringAppliance mit MGCP+MPC = Zuschauer-Seite). Grund: das HEMS teilte 11.100 W durch 3, schickte uns aber nie eine Grenze.
@@ -755,6 +765,7 @@ typedef struct {
   char cat[12];   // TXT "cat" — DeviceCategory (z.B. "1"=GridConnectionHub); "" = nicht gesetzt
   char reg[8];   // TXT "register" — "true"/"false" (Auto-Accept-Flag nach SHIP 7.3.2)
   char ip[16];   // erste IPv4
+  char ip6[46];  // SteuVE v016: erste IPv6 (eingehende IPv6-Verbindungen der echten SKI zuordnen)
   char host[33];   // mDNS-Hostname
   uint16_t port;
 } EebusPeer;
@@ -1279,10 +1290,14 @@ void EebusPollScan(void) {
       }
       if (cur->hostname) { strlcpy(p->host, cur->hostname, sizeof(p->host)); }
       p->port = cur->port;
-      for (mdns_ip_addr_t *a = cur->addr; a; a = a->next) {   // erste IPv4 reicht
-        if (ESP_IPADDR_TYPE_V4 == a->addr.type) {
+      p->ip[0] = '\0'; p->ip6[0] = '\0';
+      for (mdns_ip_addr_t *a = cur->addr; a; a = a->next) {   // erste IPv4 und erste IPv6 (SteuVE v016)
+        if ((ESP_IPADDR_TYPE_V4 == a->addr.type) && ('\0' == p->ip[0])) {
           strlcpy(p->ip, IPAddress(a->addr.u_addr.ip4.addr).toString().c_str(), sizeof(p->ip));
-          break;
+        }
+        if ((ESP_IPADDR_TYPE_V6 == a->addr.type) && ('\0' == p->ip6[0])) {
+          IPAddress a6(IPv6, (const uint8_t *)a->addr.u_addr.ip6.addr);   // gleiche Schreibweise wie remoteIP()
+          strlcpy(p->ip6, a6.toString().c_str(), sizeof(p->ip6));
         }
       }
    // SKI ist die Identitaet — ohne SKI ist der Eintrag fuer uns wertlos (SHIP 7.3.2 Pflichtfeld)
@@ -1335,11 +1350,11 @@ void EebusResponsePeers(const char *label) {
     const char *src = (pz >= 0) ? "zuordnung" : ((pm >= 0) ? "typ" : "global");
     ResponseAppend_P(PSTR("%s{\"Ski\":\"%s\",\"Id\":\"%s\",\"Model\":\"%s\",\"Brand\":\"%s\","
                           "\"Type\":\"%s\",\"Cat\":\"%s\",\"Register\":\"%s\","
-                          "\"Ip\":\"%s\",\"Host\":\"%s\",\"Port\":%d,\"Path\":\"%s\","
+                          "\"Ip\":\"%s\",\"Ip6\":\"%s\",\"Host\":\"%s\",\"Port\":%d,\"Path\":\"%s\","
                           "\"Mode\":\"%s\",\"ModeSrc\":\"%s\"}"),
                      (i) ? "," : "", p->ski, p->id, p->model, p->brand,
                      p->type, (p->cat[0]) ? p->cat : "", (p->reg[0]) ? p->reg : "",
-                     p->ip, p->host, p->port, p->path,
+                     p->ip, p->ip6, p->host, p->port, p->path,
                      (pm < 0) ? "-" : (pm ? "hems" : "steuve"), src);
   }
   ResponseAppend_P(PSTR("]}}"));
@@ -1479,7 +1494,7 @@ typedef struct {
   bool     active = false;
   uint8_t  state = SHIP_IDLE;
   char     peer_ski[41] = { 0 };   // Peer-Identitaet (aus mDNS; BearSSL-Light gibt Peer-Cert nicht her)
-  char     peer_ip[16] = { 0 };
+  char     peer_ip[46] = { 0 };   // SteuVE v016: 46 statt 16 — IPv6
   uint16_t peer_port = 0;
   char     err[80] = { 0 };
    // M2b: SME-Handshake (asynchron)
@@ -6734,6 +6749,8 @@ NetworkServer *EebusInboundSrv = nullptr;
    // (Waermepumpen-Gateway = 10969 B) sprengte den Puffer -> Server-Pfad kappte die Verbindung
    // ("WS-Frame 10969 B > Puffer, Verbindung beendet"). 32 KB deckt reale
    // Discovery + Reserve; liegt jetzt in PSRAM (special_malloc, s.u.).
+#define EEBUS_SRV_SBUF  16384   // SteuVE v015: Zwischenpuffer fuer Daten, die WAEHREND eines eigenen Sendens ankommen
+                                // (PSRAM; HEMS-Discovery bis ~11 KB soll komplett hineinpassen)
 #define EEBUS_SRV_TIMEOUT_MS  30000UL
 #define EEBUS_SRV_DATA_TIMEOUT_MS  90000UL   // Datenphase — Peers duerfen laenger schweigen
 
@@ -6750,12 +6767,14 @@ typedef struct {
   br_x509_certificate br_cert[1];
   br_ec_private_key   br_key;
   uint32_t deadline = 0;   // millis()-Timeout der Verbindung
-  char     peer_ip[16] = { 0 };
+  char     peer_ip[46] = { 0 };   // SteuVE v016: 46 statt 16 — IPv6
    // Etappe 2: WebSocket-Server + CMI
   uint8_t  ws_state = 0;   // 0=HTTP-Upgrade-Request sammeln, 1=WS aktiv (101 gesendet)
   bool     cmi_done = false;   // CMI [0,0] des Geraets beantwortet?
   uint8_t *abuf = nullptr;   // Ansammelpuffer (HTTP-Request, dann WS-Frames)
   size_t   abuf_len = 0;
+  uint8_t *sbuf = nullptr;   // SteuVE v015: beim eigenen Senden angenommene Daten (abuf ist dann im Handler in Arbeit)
+  size_t   sbuf_len = 0;
    // Etappe 3: SME-Handshake als Server (Geraet = SHIP-Client)
   uint8_t  sme_state = 0;   // 0=warte Hello, 1=warte announceMax, 2=warte select-Spiegel, 3=DONE
    // Etappe 4: Verknuepfung mit einem EConn-Slot (SPINE-Datenphase)
@@ -6787,6 +6806,8 @@ void EebusSrvFree(void) {
   if (ESrv.obuf)     { free(ESrv.obuf);     ESrv.obuf = nullptr; }
   if (ESrv.cert_der) { free(ESrv.cert_der); ESrv.cert_der = nullptr; }
   if (ESrv.abuf)     { free(ESrv.abuf);     ESrv.abuf = nullptr; }
+  if (ESrv.sbuf)     { free(ESrv.sbuf);     ESrv.sbuf = nullptr; }
+  ESrv.sbuf_len = 0;
   ESrv.cert_len = 0;
   ESrv.active = false;
   ESrv.hs_done = false;
@@ -6809,11 +6830,13 @@ bool EebusSrvStart(void) {
   ESrv.cert_der = (uint8_t*)malloc(EEBUS_CERT_DER_SIZE);
   ESrv.abuf = (uint8_t*)special_malloc(EEBUS_SRV_ABUF);   // 32 KB -> PSRAM (DRAM schonen), wird wie bisher per free() freigegeben
   ESrv.abuf_len = 0;
+  ESrv.sbuf = (uint8_t*)special_malloc(EEBUS_SRV_SBUF);   // SteuVE v015, PSRAM
+  ESrv.sbuf_len = 0;
   ESrv.ws_state = 0;
   ESrv.cmi_done = false;
   ESrv.sme_state = 0;
   ESrv.conn_idx = -1;
-  if ((nullptr == ESrv.sc) || (nullptr == ESrv.ibuf) || (nullptr == ESrv.abuf) ||
+  if ((nullptr == ESrv.sc) || (nullptr == ESrv.ibuf) || (nullptr == ESrv.abuf) || (nullptr == ESrv.sbuf) ||
       (nullptr == ESrv.obuf) || (nullptr == ESrv.cert_der)) { why = "malloc"; goto fail; }
   ESrv.cert_len = EebusLoadDer(EEBUS_CERT_FILE, ESrv.cert_der, EEBUS_CERT_DER_SIZE);
   if (0 == ESrv.cert_len) { why = "cert load"; goto fail; }
@@ -6872,14 +6895,78 @@ fail:
   return false;
 }
 
+// SteuVE v015: Empfang WAEHREND wir senden. Befund 20.10. (Direktverbindung Steuerbox -> SteuVE): beide Seiten
+// schickten gleichzeitig ihre grosse Discovery, keine las dabei -> TCP-Puffer beidseitig voll, die SteuVE gab
+// nach 3 s auf, die Steuerbox schnitt ihre Nachricht ab (Strom aus dem Takt, 49-B-"Fragmente", Schein-Close).
+// Jetzt nimmt die SteuVE beim Warten weiter Records an und legt die Klartextdaten in sbuf ab — NICHT in abuf,
+// denn wir stecken evtl. mitten im Handler eines Frames aus abuf. Der Parser bekommt sie in EebusSrvPoll.
+void EebusSrvDrainRx(void) {
+  if ((nullptr == ESrv.sbuf) || (nullptr == ESrv.sc)) { return; }
+  br_ssl_engine_context *eng = &ESrv.sc->eng;
+  for (int guard = 0; guard < 20; guard++) {
+    unsigned state = br_ssl_engine_current_state(eng);
+    if (state & BR_SSL_RECVAPP) {
+      size_t len;
+      unsigned char *buf = br_ssl_engine_recvapp_buf(eng, &len);
+      size_t room = EEBUS_SRV_SBUF - ESrv.sbuf_len;
+      size_t take = (len > room) ? room : len;
+      if (0 == take) { return; }   // Zwischenpuffer voll -> Gegenstelle wird ueber TCP gebremst
+      memcpy(ESrv.sbuf + ESrv.sbuf_len, buf, take);
+      ESrv.sbuf_len += take;
+      br_ssl_engine_recvapp_ack(eng, take);
+      continue;
+    }
+    if ((state & BR_SSL_RECVREC) && (ESrv.sock.available() > 0)) {
+      size_t len;
+      unsigned char *buf = br_ssl_engine_recvrec_buf(eng, &len);
+      int rlen = ESrv.sock.read(buf, len);
+      if (rlen > 0) { br_ssl_engine_recvrec_ack(eng, rlen); continue; }
+    }
+    return;
+  }
+}
+
+// SteuVE v015: in sbuf zwischengelagerte Daten an abuf anhaengen (nur ausserhalb jedes Frame-Handlers aufrufen).
+// true = etwas uebernommen. Passt nichts mehr in abuf (unvollstaendiger Riesenframe), wird beendet.
+bool EebusSrvFlushSbuf(void) {
+  if (0 == ESrv.sbuf_len) { return false; }
+  size_t room = EEBUS_SRV_ABUF - 1 - ESrv.abuf_len;
+  size_t take = (ESrv.sbuf_len > room) ? room : ESrv.sbuf_len;
+  if (0 == take) {
+    AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s: App-Puffer voll ohne kompletten Frame, Verbindung beendet"), ESrv.peer_ip);
+    EebusSrvFree();
+    return false;
+  }
+  memcpy(ESrv.abuf + ESrv.abuf_len, ESrv.sbuf, take);
+  ESrv.abuf_len += take;
+  memmove(ESrv.sbuf, ESrv.sbuf + take, ESrv.sbuf_len - take);
+  ESrv.sbuf_len -= take;
+  return true;
+}
+
 // Anwendungsdaten in die TLS-Engine schreiben (Server-Sendepfad). Schreibt die
 // Nutzlast in den Engine-Klartextpuffer und schiebt die verschluesselten Records
-// direkt zum Socket (kleine Nachrichten; bei vollem Socket-Puffer max 3 s warten).
+// direkt zum Socket. SteuVE v015: Socket ohne Warten beschreiben, in JEDER Runde zuerst Empfangenes
+// annehmen (EebusSrvDrainRx), Abbruch erst nach EEBUS_SRV_TX_STALL_MS OHNE Fortschritt (bisher 3 s ab Beginn —
+// und NetworkClient::write blockierte selbst bis ~10 s, bevor die 3 s ueberhaupt geprueft wurden).
+#define EEBUS_SRV_TX_STALL_MS  5000UL
+
+// SteuVE v015: Socket-Senden ohne Warten. >0 = gesendet, 0 = Socket-Puffer gerade voll, -1 = Fehler.
+int EebusSrvSockWriteNb(const unsigned char *buf, size_t len) {
+  int fd = ESrv.sock.fd();
+  if (fd < 0) { return -1; }
+  int r = send(fd, buf, len, MSG_DONTWAIT);
+  if (r >= 0) { return r; }
+  if ((EAGAIN == errno) || (EWOULDBLOCK == errno)) { return 0; }
+  return -1;
+}
+
 bool EebusSrvAppWrite(const uint8_t *data, size_t len) {
   br_ssl_engine_context *eng = &ESrv.sc->eng;
   size_t off = 0;
-  uint32_t t0 = millis();
+  uint32_t t_fort = millis();   // letzter Fortschritt beim Senden
   while (off < len) {
+    EebusSrvDrainRx();   // SteuVE v015: zuerst annehmen, sonst blockieren sich beide Seiten
     unsigned state = br_ssl_engine_current_state(eng);
     if (state & BR_SSL_CLOSED) { return false; }
     if (state & BR_SSL_SENDAPP) {
@@ -6890,15 +6977,25 @@ bool EebusSrvAppWrite(const uint8_t *data, size_t len) {
       br_ssl_engine_sendapp_ack(eng, n);
       off += n;
       br_ssl_engine_flush(eng, 0);   // Record schliessen -> SENDREC
+      t_fort = millis();
       continue;
     }
     if (state & BR_SSL_SENDREC) {   // Records zum Socket schieben (macht Platz)
       size_t rlen;
       unsigned char *rbuf = br_ssl_engine_sendrec_buf(eng, &rlen);
-      int wlen = ESrv.sock.write(rbuf, rlen);
-      if (wlen > 0) { br_ssl_engine_sendrec_ack(eng, wlen); continue; }
+      int wlen = EebusSrvSockWriteNb(rbuf, rlen);
+      if (wlen < 0) {
+        AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV Senden an %s: Socket-Fehler (%u von %u B)"),
+               ESrv.peer_ip, (uint32_t)off, (uint32_t)len);
+        return false;
+      }
+      if (wlen > 0) { br_ssl_engine_sendrec_ack(eng, wlen); t_fort = millis(); continue; }
     }
-    if (millis() - t0 > 3000) { return false; }
+    if (millis() - t_fort > EEBUS_SRV_TX_STALL_MS) {
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV Senden an %s abgebrochen, %u s ohne Fortschritt (%u von %u B)"),
+             ESrv.peer_ip, (uint32_t)(EEBUS_SRV_TX_STALL_MS / 1000), (uint32_t)off, (uint32_t)len);
+      return false;
+    }
     delay(1);
   }
   br_ssl_engine_flush(eng, 0);   // letzten Record schliessen (Pumpe sendet)
@@ -7033,7 +7130,8 @@ void EebusSrvLinkConn(void) {
    // erkannt wird (Betriebsart HEMS/SteuVE, Anzeige, Wiederaufbau sieht die bestehende Verbindung).
    // Nicht in der Liste -> Pseudo-SKI bleibt, globaler Default gilt.
   for (uint32_t k = 0; k < Eebus.peer_count; k++) {
-    if (0 == strcmp(Eebus.peers[k].ip, ESrv.peer_ip)) {
+    if ((0 == strcmp(Eebus.peers[k].ip, ESrv.peer_ip)) ||
+        (Eebus.peers[k].ip6[0] && (0 == strcasecmp(Eebus.peers[k].ip6, ESrv.peer_ip)))) {   // SteuVE v016: auch IPv6
       strlcpy(cc->peer_ski, Eebus.peers[k].ski, sizeof(cc->peer_ski));
       cc->peer_idx  = (int)k;
       cc->peer_port = Eebus.peers[k].port;
@@ -7290,8 +7388,16 @@ void EebusSrvPoll(void) {
     if (state & BR_SSL_SENDREC) {   // ausgehende Records haben Vorrang
       size_t len;
       unsigned char *buf = br_ssl_engine_sendrec_buf(eng, &len);
-      int wlen = ESrv.sock.write(buf, len);
+      int wlen = EebusSrvSockWriteNb(buf, len);   // SteuVE v015: ohne Warten (write blockierte bis ~10 s)
       if (wlen > 0) { br_ssl_engine_sendrec_ack(eng, wlen); continue; }
+      if (wlen < 0) {
+        AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s: Socket-Fehler beim Senden, Verbindung beendet"), ESrv.peer_ip);
+        EebusSrvFree();
+        return;
+      }
+      if (state & (BR_SSL_RECVREC | BR_SSL_RECVAPP)) {
+        EebusSrvDrainRx();   // Socket voll -> wenigstens annehmen, damit die Gegenstelle weitersenden kann
+      }
       return;   // Socket-Sendepuffer voll -> naechster Tick
     }
     if (!ESrv.hs_done && (state & (BR_SSL_SENDAPP | BR_SSL_RECVAPP))) {
@@ -7299,7 +7405,14 @@ void EebusSrvPoll(void) {
       AddLog(LOG_LEVEL_INFO, PSTR("EBG: *** SRV TLS-SERVER-HANDSHAKE FERTIG mit %s (ECDHE_ECDSA_AES128_GCM) ***"),
              ESrv.peer_ip);
     }
-    if (state & BR_SSL_RECVAPP) {   // entschluesselte Daten -> Ansammelpuffer -> Parser
+    if (EebusSrvFlushSbuf()) {   // SteuVE v015: beim Senden angenommene Daten zuerst (Reihenfolge!)
+      EebusSrvAppData();
+      if (!ESrv.active) { return; }
+      ESrv.deadline = millis() + ((3 == ESrv.sme_state) ? EEBUS_SRV_DATA_TIMEOUT_MS : EEBUS_SRV_TIMEOUT_MS);
+      continue;
+    }
+    if (!ESrv.active) { return; }   // FlushSbuf hat bei vollem Puffer beendet
+    if ((state & BR_SSL_RECVAPP) && (0 == ESrv.sbuf_len)) {   // entschluesselte Daten -> Ansammelpuffer -> Parser
       size_t len;
       unsigned char *buf = br_ssl_engine_recvapp_buf(eng, &len);
       size_t room = EEBUS_SRV_ABUF - 1 - ESrv.abuf_len;   // -1: Platz fuer NUL (HTTP-Phase)
