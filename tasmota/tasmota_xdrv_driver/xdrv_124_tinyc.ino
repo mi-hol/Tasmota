@@ -1019,6 +1019,12 @@ static void TinyCInit(void) {
   // Slots allocated on demand (upload, load, run API)
 
   AddLog(LOG_LEVEL_INFO, PSTR("TCC: TinyC v" TC_RELEASE " initialized (%d bytes, %d free)"), needed, ESP_getFreeHeap());
+#ifdef USE_UFILESYS
+  // Which file system programs and .pvs files are read from at this boot. With an SD card that failed to mount at boot this
+  // says "flash": scripts, settings and pages then come from (or go to) a different copy than on the card (Andreas, 20.10.2026).
+  AddLog(LOG_LEVEL_INFO, PSTR("TCC: user file system = %s%s"), (ufsp && ffsp && ufsp != ffsp) ? "SD card" : "flash",
+         (ufsp && ffsp && ufsp != ffsp) ? ", flash as fallback" : "");
+#endif
 
   // Load slot config from /tinyc.cfg (loads files + auto-runs marked slots)
 #ifdef USE_UFILESYS

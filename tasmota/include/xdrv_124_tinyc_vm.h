@@ -19261,7 +19261,12 @@ static void tc_persist_load(TcVM *vm, bool heap_phase) {
 #ifdef USE_UFILESYS
   File f;
   if (ufsp) f = ufsp->open(vm->persist_file, "r");
-  if (!f && ffsp && ffsp != ufsp) f = ffsp->open(vm->persist_file, "r");
+  if (!f && ffsp && ffsp != ufsp) {
+    f = ffsp->open(vm->persist_file, "r");
+    if (f) {   // a copy on the flash is older or newer than the one on the SD card, never the same: say where the values came from
+      AddLog(LOG_LEVEL_INFO, PSTR("TCC: persist %s not on the SD card - read from the FLASH file system"), vm->persist_file);
+    }
+  }
   if (!f) return;
 
   uint16_t fsize = f.size();
