@@ -56,7 +56,7 @@ with total size and `abi_rev`) arrived in 1.6.35; v2–v5 files still load.
 
 ---
 
-## 1.6.74 — unreleased
+## 1.6.74 — 2026-10-21
 
 - **The repository drop-down now offers both sources by default** (mi-hol, #131). The default `TINYC_REPO_LIST` has our repository and ottelo's SmartMeter/PV/Emulator programs (the same two entries his images carry). Up to 1.6.73 it had one entry, and with one entry the `/tc` page shows no source drop-down: a device that was updated from ottelo's image lost the drop-down and his programs. Our repository stays preselected. Without flashing: a file `/tinyc_repos.cfg` with the two lines replaces the list (see the reference).
 - ⚠️ **A program name of 27 or more characters could destroy the program (ESP32; Andreas, 15.10.2026).** The slot, `/tinyc.cfg`, the upload and the persist file each held the name in 32 bytes. The upload cut it to 31 characters and lost the `.tcb`, the persist file got no `.pvs` and ended up with the SAME path as the program, and the first `saveVars()` / slot stop wrote the persist data over the program (118 bytes became 14, then `Load failed: Invalid binary` after the next start); two long names with the same start also landed in one file. Now the four buffers are 64 bytes on the ESP32 (`TC_FILENAME_MAX`; ESP8266 stays at 32), an upload (or `TinyCRun`) with a name that still does not fit is **refused** with a clear message (HTTP 400, the slot keeps its program), and the persist name is always `<stem>.pvs` and can never be the program's own path. Reproduced on an ESP32-S3 (a program with a `persist` variable and names of 4, 26, 27 and 35 characters). Programs with a name of up to 26 characters were never affected.
