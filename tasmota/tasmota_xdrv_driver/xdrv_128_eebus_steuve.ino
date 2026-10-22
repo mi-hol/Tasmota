@@ -7,6 +7,11 @@
 
   Abgeleitet aus xdrv_126_eebus_guard.ino v184 (Steuerbox). Eigene Versionszaehlung ab SteuVE v001.
   SteuVE v017 (21.10.2026): eingehende Verbindung auch ueber die AccessMethods-Kennung der SKI zuordnen (wie Steuerbox v188).
+  SteuVE v018 (21.10.2026): eine ueber die Kennung zugeordnete SKI zaehlt NICHT fuer das Vertrauen (EebusCsTrusted) -
+    Hinweis gemu: die Kennung sendet das Gegenueber selbst; ohne SKI-Pruefung am Zertifikat sonst leichter zu faelschen.
+  SteuVE v020 (21.10.2026): kein Absturz mehr beim Anrufen eines Geraets, das nur IPv6 meldet (wie Steuerbox v189).
+  SteuVE v019 (21.10.2026): EEBusCsTrust <ski> sucht den neuen Energy Guard sofort (Wiederaufbau + neue mDNS-Ankuendigung),
+    ohne Neustart; EEBusCsTrust 0 vergisst den gemerkten Partner, wenn es der alte Energy Guard war.
   SHIP/TLS/Discovery/Herzschlag/Wiederaufbau sind die bewaehrten Teile der Steuerbox; die
   Steuerbox-Funktionen (Rolle 1, EEBusLpc/EEBusLpp usw.) sind vorerst noch enthalten.
   NICHT zusammen mit xdrv_126 einbauen (gleiche Funktionsnamen) — der Build bricht dann ab.
@@ -1702,6 +1707,9 @@ typedef struct {
    // dann ueber EebusSrvWsSendOp (unmaskiert), RX kommt aus der ESrv-Pumpe; client/rxbuf
    // bleiben nullptr. Timeout/Close verwaltet das ESrv-Modul, nicht EebusSmePoll.
   bool     via_srv = false;
+   // SteuVE v018: SKI kam ueber die (vom Gegenueber selbst gesendete) AccessMethods-Kennung, nicht ueber die Adresse.
+   // Gilt NICHT fuer das Vertrauen (EebusCsTrusted) - die SKI wird nicht gegen das TLS-Zertifikat geprueft.
+  bool     ski_aus_id = false;
 } EebusConn;
 
 EebusConn EConn[EEBUS_MAX_CONN];   // die 3 Verbindungs-Slots
@@ -2021,6 +2029,21 @@ void EebusHeapCheckN(const char *where, uint32_t num) {
 // (Signatur bewusst nur mit int — kein eigener Typ, wegen .ino-Prototypen-Falle.)
 bool EebusShipConnect(int idx) {
   EebusPeer *p = &Eebus.peers[idx];
+   // SteuVE v020: Zieladresse festlegen, BEVOR irgendetwas angelegt wird. Meldet ein Geraet per mDNS nur IPv6
+   // (21.10. Testnetz: SteuVE mit WLAN + LAN antwortete am LAN nur mit AAAA), wird ueber IPv6 verbunden.
+   // Ohne verwendbare Adresse kein Versuch: bisher lief fromString("") in den fail-Zweig, und EebusShipFree()
+   // rief stop() auf einem TLS-Client, der nie verbunden war -> Load access fault an Adresse 0 (Neustart).
+  const char *dst = p->ip[0] ? p->ip : p->ip6;
+  IPAddress dst_addr;
+  if (!dst[0] || !dst_addr.fromString(dst)) {
+    strlcpy(ESp->err, dst[0] ? "Adresse ungueltig" : "keine Adresse (mDNS)", sizeof(ESp->err));
+    ESp->state = SHIP_ERROR;
+    AddLog(LOG_LEVEL_ERROR, PSTR("EBG: kein Verbindungsversuch zu %s - %s"), p->ski, ESp->err);
+    return false;
+  }
+  char dst_host[50];   // fuer den Host-Header des WebSocket-Upgrades: IPv6 in eckigen Klammern
+  if (strchr(dst, ':')) { snprintf(dst_host, sizeof(dst_host), "[%s]", dst); }
+  else { strlcpy(dst_host, dst, sizeof(dst_host)); }
   if (ESp->client) {   // alte Verbindung im Slot (evtl. teardown noch anstehend):
     EebusShipFree();   // freigeben und lwip/W5500 den Socket-Abbau beenden lassen,
     delay(100);   // BEVOR der neue tcp_connect startet (Crash-Befundspaet)
@@ -2031,6 +2054,7 @@ bool EebusShipConnect(int idx) {
   ESp->state = SHIP_IDLE;
   ESp->sme = SME_OFF;
   ESp->peer_id[0] = '\0';
+  ESp->ski_aus_id = false;   // SteuVE v018
   ESp->peer_dev[0] = '\0';   // M3: SPINE-Zustand ruecksetzen
   ESp->disco_answered = false;
   ESp->peer_disco_read = false;
@@ -2081,7 +2105,7 @@ bool EebusShipConnect(int idx) {
   ESp->lpc_result[0] = '\0';
   ESp->peer_idx = idx;
   ESp->last_rx = millis();
-  strlcpy(ESp->peer_ip, p->ip, sizeof(ESp->peer_ip));
+  strlcpy(ESp->peer_ip, dst, sizeof(ESp->peer_ip));   // SteuVE v020: IPv4 oder (ersatzweise) IPv6
   strlcpy(ESp->peer_ski, p->ski, sizeof(ESp->peer_ski));   // Peer-Identitaet aus mDNS
   EebusModeApply(ESp->peer_ski);   // Betriebsmodus (HEMS/SteuVE) aus SKI-Zuordnung
   ESp->peer_port = p->port;
@@ -2129,8 +2153,7 @@ bool EebusShipConnect(int idx) {
    // Der IPAddress-connect() nutzt _domain (leer) fuer SNI -> es wird KEIN SNI gesendet.
    // NIE ein IP-Literal als SNI setzen — mbedtls-Gegenstellen lehnen das mit err=296 ab.
   {
-    IPAddress peer_addr;
-    if (!peer_addr.fromString(p->ip) || !ESp->client->connect(peer_addr, p->port)) {
+    if (!ESp->client->connect(dst_addr, p->port)) {   // SteuVE v020: Adresse oben geprueft (IPv4 oder IPv6)
       snprintf(ESp->err, sizeof(ESp->err), "tls connect err=%d", (int)ESp->client->getLastError());
       goto fail;
     }
@@ -2139,7 +2162,7 @@ bool EebusShipConnect(int idx) {
   EebusHeapCheck("tls_handshake");   // Checkpunkt: nach BearSSL-TLS-Handshake (inkl. ECDSA-Signieren)
 
    // WebSocket-Upgrade (Subprotocol "ship")
-  if (!EebusWsUpgrade(p->ip, p->port, p->path)) { goto fail; }   // err bereits gesetzt
+  if (!EebusWsUpgrade(dst_host, p->port, p->path)) { goto fail; }   // err bereits gesetzt (SteuVE v020: IPv6 in [])
   ESp->state = SHIP_WS_OK;
   EebusHeapCheck("ws_upgrade");   // Checkpunkt: nach HTTP-Upgrade
 
@@ -2412,6 +2435,7 @@ void EebusSmeFail(const char *why) {
 // Nach CMI-ok den SME-Handshake starten: wir sind sofort "ready" (Tool vertraut jedem).
 void EebusSmeStart(void) {
   ESp->peer_id[0] = '\0';
+  ESp->ski_aus_id = false;   // SteuVE v018
   ESp->sme_pending_logged = false;
    // SHIP 13.4.4.1.3: Update-Message immer mit maximaler Wartezeit melden
   if (!EebusShipSendJson("{\"connectionHello\":[{\"phase\":\"ready\"},{\"waiting\":60000}]}", 1)) {
@@ -3259,7 +3283,10 @@ void EebusCsTrustSave(void) {
 // SteuVE v006: ist die Gegenstelle der AKTUELLEN Verbindung (ESp) der vertraute Energy Guard?
 bool EebusCsTrusted(void) {
   if (!eebus_cs_trust_loaded) { EebusCsTrustLoad(); }
-  return eebus_cs_trust[0] && (0 == strcasecmp(ESp->peer_ski, eebus_cs_trust));
+   // SteuVE v018: eine ueber die Kennung zugeordnete SKI zaehlt NICHT (die Kennung sendet das Gegenueber selbst, und
+   // die SKI wird nicht gegen das Zertifikat geprueft) - sonst koennte jedes Geraet im LAN mit der oeffentlichen
+   // mDNS-Kennung des Energy Guards Grenzen/Failsafe schreiben. Gilt, bis die SKI am Zertifikat geprueft wird.
+  return eebus_cs_trust[0] && !ESp->ski_aus_id && (0 == strcasecmp(ESp->peer_ski, eebus_cs_trust));
 }
 
 // SteuVE v006: alle Verbindungen zu dieser SKI trennen (Vertrauen entzogen / gewechselt).
@@ -3692,6 +3719,22 @@ void CmndEebusCsTrust(void) {
         eebus_cs_last_hb = 0;
         eebus_cs_changed = true;
         if (!eebus_cs_sim) { EebusCsSetState(CS_AUTO); }
+      }
+       // SteuVE v019: Vertrauenswechsel wirkt ohne Neustart. Bisher war der Wiederaufbau nach dem Boot schon
+       // abgeschlossen (AC_DONE) - die SteuVE suchte den neuen Energy Guard nicht, und ein Energiemanager rief erst
+       // nach einem Neustart der SteuVE wieder an (beobachtet 18:59->19:14, 20:28->20:33 am 18./20.10.).
+       // Jetzt: neuen Energy Guard als Wiederaufbau-Partner merken, in 5 s scannen und selbst anrufen (falls er
+       // nicht von sich aus anruft), und uns neu ankuendigen, damit ein Energiemanager uns wieder findet.
+       // Vertrauen entzogen: gemerkten Partner vergessen, wenn es der alte war (kein Wiederaufbau zu ihm).
+      if (neu[0]) {
+        EebusPeerRemember(neu);
+        eebus_ac_try   = 0;
+        eebus_ac_next  = millis() + 5000;
+        eebus_ac_state = AC_WAIT;
+        EebusMdnsAdvertise();
+        AddLog(LOG_LEVEL_INFO, PSTR("EBG: SteuVE: neuer Energy Guard %s - Verbindung wird in 5 s gesucht (ohne Neustart)"), neu);
+      } else if (alt[0] && (0 == strcasecmp(eebus_ac_ski, alt))) {
+        EebusPeerForget();
       }
     }
   }
@@ -7086,6 +7129,7 @@ void EebusSrvLinkConn(void) {
   eebus_conn_at = millis(); eebus_conn_cnt++; eebus_cs_bound = false;   // SteuVE v009
   cc->err[0] = '\0';
   cc->peer_id[0] = '\0';
+  cc->ski_aus_id = false;   // SteuVE v018
   cc->peer_dev[0] = '\0';
   cc->disco_answered = false;
   cc->peer_disco_read = false;
@@ -7162,9 +7206,10 @@ void EebusSrvSkiFromId(int ci, const char *pid) {   // Slotnummer statt EebusCon
       strlcpy(cc->peer_ski, Eebus.peers[k].ski, sizeof(cc->peer_ski));
       cc->peer_idx  = (int)k;
       cc->peer_port = Eebus.peers[k].port;
+      cc->ski_aus_id = true;   // SteuVE v018: zaehlt nicht fuer das Vertrauen
       EebusModeApply(cc->peer_ski);
       EebusStatSet(cc->peer_ski, SHIP_CMI_OK, "");
-      AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s ist SKI %s (ueber die Kennung %s)"), cc->peer_ip, cc->peer_ski, pid);
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s ist SKI %s (ueber die Kennung %s) - zaehlt nicht fuer das Vertrauen"), cc->peer_ip, cc->peer_ski, pid);
       return;
     }
   }

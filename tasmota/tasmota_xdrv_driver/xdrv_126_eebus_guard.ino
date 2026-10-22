@@ -460,6 +460,8 @@ static const uint16_t kEebusLateReadS[3] = { 60, 180, 420 };
 // 2 min danach wieder verbunden.
 static const uint16_t kEebusKaWaitS[6] = { 8, 15, 30, 60, 120, 120 };
 
+// v189 (21.10.): Absturz beim Anrufen eines Geraets, das per mDNS nur IPv6 meldet (fromString("") -> fail -> stop() auf
+// nie verbundenem TLS-Client -> Load access fault). Zieladresse vorher pruefen, ersatzweise IPv6, sonst kein Versuch.
 // v188 (21.10.): eingehende Verbindung zusaetzlich ueber die AccessMethods-Kennung der SKI zuordnen (EebusSrvSkiFromId),
 // wenn die Adresse nicht passt (Geraet mit mehreren IPv6-Adressen ruft ueber eine andere an, als der Scan gemerkt hat).
 // v187 (20.10.): Senden robust. (1) Frame in EINEM Puffer + EINEM write() statt 64-B-Stuecken (je ein TLS-Record).
@@ -1844,6 +1846,21 @@ void EebusHeapCheckN(const char *where, uint32_t num) {
 // (Signatur bewusst nur mit int — kein eigener Typ, wegen .ino-Prototypen-Falle.)
 bool EebusShipConnect(int idx) {
   EebusPeer *p = &Eebus.peers[idx];
+   // v189: Zieladresse festlegen, BEVOR irgendetwas angelegt wird. Meldet ein Geraet per mDNS nur IPv6
+   // (21.10. Testnetz: SteuVE mit WLAN + LAN antwortete am LAN nur mit AAAA), wird ueber IPv6 verbunden.
+   // Ohne verwendbare Adresse kein Versuch: bisher lief fromString("") in den fail-Zweig, und EebusShipFree()
+   // rief stop() auf einem TLS-Client, der nie verbunden war -> Load access fault an Adresse 0 (Neustart).
+  const char *dst = p->ip[0] ? p->ip : p->ip6;
+  IPAddress dst_addr;
+  if (!dst[0] || !dst_addr.fromString(dst)) {
+    strlcpy(ESp->err, dst[0] ? "Adresse ungueltig" : "keine Adresse (mDNS)", sizeof(ESp->err));
+    ESp->state = SHIP_ERROR;
+    AddLog(LOG_LEVEL_ERROR, PSTR("EBG: kein Verbindungsversuch zu %s - %s"), p->ski, ESp->err);
+    return false;
+  }
+  char dst_host[50];   // fuer den Host-Header des WebSocket-Upgrades: IPv6 in eckigen Klammern
+  if (strchr(dst, ':')) { snprintf(dst_host, sizeof(dst_host), "[%s]", dst); }
+  else { strlcpy(dst_host, dst, sizeof(dst_host)); }
   if (ESp->client) {   // alte Verbindung im Slot (evtl. teardown noch anstehend):
     EebusShipFree();   // freigeben und lwip/W5500 den Socket-Abbau beenden lassen,
     delay(100);   // BEVOR der neue tcp_connect startet (Crash-Befundspaet)
@@ -1902,7 +1919,7 @@ bool EebusShipConnect(int idx) {
   ESp->lpc_result[0] = '\0';
   ESp->peer_idx = idx;
   ESp->last_rx = millis();
-  strlcpy(ESp->peer_ip, p->ip, sizeof(ESp->peer_ip));
+  strlcpy(ESp->peer_ip, dst, sizeof(ESp->peer_ip));   // v189: IPv4 oder (ersatzweise) IPv6
   strlcpy(ESp->peer_ski, p->ski, sizeof(ESp->peer_ski));   // Peer-Identitaet aus mDNS
   EebusModeApply(ESp->peer_ski);   // Betriebsmodus (HEMS/SteuVE) aus SKI-Zuordnung
   ESp->peer_port = p->port;
@@ -1951,8 +1968,7 @@ bool EebusShipConnect(int idx) {
    // Der IPAddress-connect() nutzt _domain (leer) fuer SNI -> es wird KEIN SNI gesendet.
    // NIE ein IP-Literal als SNI setzen — mbedtls-Gegenstellen lehnen das mit err=296 ab.
   {
-    IPAddress peer_addr;
-    if (!peer_addr.fromString(p->ip) || !ESp->client->connect(peer_addr, p->port)) {
+    if (!ESp->client->connect(dst_addr, p->port)) {   // v189: Adresse oben geprueft (IPv4 oder IPv6)
       snprintf(ESp->err, sizeof(ESp->err), "tls connect err=%d", (int)ESp->client->getLastError());
       goto fail;
     }
@@ -1961,7 +1977,7 @@ bool EebusShipConnect(int idx) {
   EebusHeapCheck("tls_handshake");   // Checkpunkt: nach BearSSL-TLS-Handshake (inkl. ECDSA-Signieren)
 
    // WebSocket-Upgrade (Subprotocol "ship")
-  if (!EebusWsUpgrade(p->ip, p->port, p->path)) { goto fail; }   // err bereits gesetzt
+  if (!EebusWsUpgrade(dst_host, p->port, p->path)) { goto fail; }   // err bereits gesetzt (v189: IPv6 in [])
   ESp->state = SHIP_WS_OK;
   EebusHeapCheck("ws_upgrade");   // Checkpunkt: nach HTTP-Upgrade
 
