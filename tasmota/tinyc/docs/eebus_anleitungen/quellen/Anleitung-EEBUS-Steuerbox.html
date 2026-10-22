@@ -28,7 +28,7 @@
 <body>
 
 <h1>EEBUS-Steuerbox auf Tasmota</h1>
-<div class="kopf">Bedienungsanleitung · Stand 21.10.2026 · Treiber <code>xdrv_126</code> v187 · Persönliche Daten in den Bildern unkenntlich gemacht<br>Erstellt von <b>meierchen006</b> mit Hilfe von Claude</div>
+<div class="kopf">Bedienungsanleitung · Stand 21.10.2026 · Treiber <code>xdrv_126</code> v189 · Persönliche Daten in den Bildern unkenntlich gemacht<br>Erstellt von <b>meierchen006</b> mit Hilfe von Claude</div>
 
 <div class="warn"><b>Testgerät, nicht zertifiziert.</b> Die Steuerbox dient dazu, die EEBUS-Kommunikation mit einem HEMS (Energiemanagementsystem im Haus) oder mit einer steuerbaren Verbrauchseinrichtung zu prüfen. Sie ersetzt weder die Steuerbox des Messstellenbetreibers noch ein geprüftes Gerät nach § 14a EnWG und ist nicht für den regulären Betrieb gedacht.</div>
 
@@ -39,7 +39,7 @@
   <li><b>§ 9 EEG – Einspeisebegrenzung (LPP):</b> wie viel die Erzeugungsanlage höchstens einspeisen darf.</li>
 </ul>
 <p>Gegenstelle ist entweder ein <b>HEMS</b>, das die Vorgabe auf seine Geräte verteilt, oder direkt ein <b>einzelnes Gerät</b> (Direktsteuerung, zum Beispiel ein Wärmepumpen-Gateway oder die <b>SteuVE</b>, eine steuerbare Verbrauchseinrichtung auf Tasmota mit eigener Anleitung).</p>
-<p>Die Box kann gleichzeitig mit einem HEMS und mit einem einzelnen Gerät verbunden sein. Verbindungen laufen über IPv4 oder IPv6; ruft eine Gegenstelle über IPv6 an, ordnet die Box sie anhand ihrer SKI dem gefundenen Gerät zu.</p>
+<p>Die Box kann gleichzeitig mit einem HEMS und mit einem einzelnen Gerät verbunden sein. Verbindungen laufen über IPv4 oder IPv6; ruft eine Gegenstelle selbst an, ordnet die Box die Verbindung über die Adresse oder – wenn das Gerät mehrere Adressen hat – über die Kennung, die es beim Verbinden mitschickt, dem gefundenen Gerät zu. Im Log steht dann „… ist SKI … (ueber die Kennung …)“.</p>
 
 <h2>2. Seite aufrufen</h2>
 <p>Auf der Tasmota-Hauptseite der Box auf <b>„Steuerbox“</b> klicken. Die Seite liegt als Datei <code>steuerbox.html</code> im Dateisystem der Box (Flash oder SD).</p>

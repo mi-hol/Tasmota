@@ -29,7 +29,7 @@
 <body>
 
 <h1>SteuVE auf Tasmota</h1>
-<div class="kopf">Bedienungsanleitung · Stand 21.10.2026 · Treiber <code>xdrv_128</code> v016 + TinyC-Skript <code>steuve</code> v010 · Persönliche Daten in den Bildern unkenntlich gemacht<br>Erstellt von <b>meierchen006</b> mit Hilfe von Claude</div>
+<div class="kopf">Bedienungsanleitung · Stand 21.10.2026 · Treiber <code>xdrv_128</code> v020 + TinyC-Skript <code>steuve</code> v010 · Persönliche Daten in den Bildern unkenntlich gemacht<br>Erstellt von <b>meierchen006</b> mit Hilfe von Claude</div>
 
 <div class="warn"><b>Testgerät, nicht zertifiziert.</b> Die SteuVE dient dazu, die EEBUS-Steuerung nach § 14a EnWG an einem HEMS (Energiemanagementsystem im Haus) zu prüfen und auszuprobieren. Sie ist keine geprüfte steuerbare Verbrauchseinrichtung im Sinne von § 14a Abs. 1 EnWG mit BNetzA-Festlegung BK6-22-300 und nicht für den regulären Betrieb gedacht.</div>
 
@@ -80,7 +80,7 @@
   <li>In der Liste beim gewünschten Gerät <b>Vertrauen</b> klicken (Normalfall: das HEMS). <b>Immer nach Name bzw. SKI wählen</b> – die Reihenfolge ändert sich bei jedem Scan.</li>
   <li>Im HEMS die SteuVE koppeln bzw. ihre SKI bestätigen. Steht rechts „verbunden“ und „vertraut“, ist es fertig.</li>
 </ol>
-<p>Nur <b>ein</b> Energy Guard kann vertraut sein. Nur er darf Grenzen und Failsafe-Werte schreiben; fremde Schreibversuche werden abgewiesen (Zähler „Abgewiesen“). <b>Vertrauen entziehen</b> trennt sofort; die SteuVE läuft dann autonom ohne Begrenzung.</p>
+<p>Nur <b>ein</b> Energy Guard kann vertraut sein. Nur er darf Grenzen und Failsafe-Werte schreiben; fremde Schreibversuche werden abgewiesen (Zähler „Abgewiesen“). <b>Vertrauen entziehen</b> trennt sofort; die SteuVE läuft dann autonom ohne Begrenzung. Ein <b>neues Vertrauen</b> wirkt ebenfalls sofort: Die SteuVE sucht den Energy Guard und verbindet sich mit ihm, ein Neustart ist nicht nötig.</p>
 <div class="info"><b>Direkt an der Steuerbox (Test ohne HEMS):</b> Vertraut die SteuVE einer Steuerbox, verbindet sie sich direkt mit ihr – über IPv4 oder IPv6. Bis die Steuerbox die erste Grenze schreibt, steht der Zustand auf <b>„autonom“</b>; erst mit dieser Grenze bindet sich die Steuerbox als Energy Guard. Das ist so gewollt und kein Fehler.</div>
 
 <h2 class="seite">5. Reiter „Verbraucher“ – Geräte eintragen</h2>
@@ -165,8 +165,7 @@
 <h2 class="seite">10. Skript aktualisieren</h2>
 <ul>
   <li>Das Skript läuft in <b>Slot 0</b>. Ein neues Skript über <b>TinyC</b> oder <b>TinyC-IDE</b> laden; vorher den Slot stoppen.</li>
-  <li>Die Verbraucherliste steht in einer <code>.pvs</code>-Datei, deren Name dem Skriptdateinamen folgt. Lädt man eine neue Fassung desselben Skripts (gleicher <code>@name</code>) unter <b>neuem Dateinamen</b>, übernimmt TinyC die alte Liste selbst (im Log: „persist values taken over“).</li>
-  <li>Je nach TinyC-Stand greift diese Übernahme beim Laden über die <b>TinyC-IDE</b> noch nicht; dann beginnt das neue Skript mit <b>leerer Liste</b>. Abhilfe: die alte <code>.pvs</code> unter den neuen Namen kopieren, <b>solange das neue Skript noch nicht geladen ist</b> (ein geladenes, gestopptes Skript überschreibt die Kopie sonst mit seinen Vorgaben), oder die Plätze neu eintragen.</li>
+  <li>Die Verbraucherliste steht in einer <code>.pvs</code>-Datei, deren Name dem Skriptdateinamen folgt. Lädt man eine neue Fassung desselben Skripts (gleicher <code>@name</code>) unter <b>neuem Dateinamen</b>, übernimmt TinyC die alte Liste selbst (im Log: „persist values taken over“) – auch beim Laden über die <b>TinyC-IDE</b>.</li>
   <li>Vor jedem Update die Liste notieren: Konsole → <code>STVCFG</code>. Mit <code>STVSET</code> lässt sie sich schnell wieder eintragen.</li>
   <li>Lokal geladene Skripte heißen in der IDE immer <code>slot&lt;N&gt;-&lt;name&gt;</code> und haben keinen Update-Knopf. Der Update-Knopf erscheint nur bei Skripten aus dem Verzeichnis, wenn dort eine neuere <code>@version</code> liegt.</li>
 </ul>
@@ -203,13 +202,13 @@
 <h3>Ein Tasmota-Gerät steht auf „kein Shelly/Tasmota?“ oder „Tasmota: Passwort?“</h3>
 <p>Das Gerät antwortet, aber nicht verwertbar. Im Browser <code>http://&lt;Adresse&gt;/cm?cmnd=Status</code> aufrufen: Kommt eine Warnung, ist ein Web-Passwort gesetzt; kommt nichts, ist die HTTP-Schnittstelle ausgeschaltet. Danach „prüfen“ klicken.</p>
 <h3>Die Verbraucherliste ist nach einem Update leer</h3>
-<p>Das Skript wurde unter einem neuen Dateinamen geladen und hat eine neue, leere <code>.pvs</code> angelegt (Abschnitt 10). Ebenso kann es direkt nach einem Neustart passieren, wenn die SD-Karte beim Start noch nicht bereit war und das Skript die Kopie im Flash gelesen hat.</p>
+<p>Das Skript wurde mit einem anderen <code>@name</code> geladen (dann gibt es nichts zu übernehmen) und hat eine neue, leere <code>.pvs</code> angelegt (Abschnitt 10). Ebenso kann es direkt nach einem Neustart passieren, wenn die SD-Karte beim Start noch nicht bereit war und das Skript die Kopie im Flash gelesen hat.</p>
 <h3>Das HEMS meldet weniger Grenze, als die Steuerbox gesetzt hat</h3>
 <p>Ein HEMS verteilt die Vorgabe der Steuerbox auf seine Geräte. Wie es aufteilt, legt das HEMS fest; die SteuVE bekommt nur ihren Anteil (Anzeige „Anteil SteuVE“ in der Übersicht).</p>
 <h3>Ein Verbraucher wird trotz Grenze nicht abgeschaltet</h3>
 <p>Abgeschaltet wird nur, was „abschaltbar“ ist und gerade zieht, und nur, solange die Summe über der Grenze liegt. Reine Messgeräte (PM Mini, EM, 3EM, Tasmota ohne Relais) werden nie geschaltet.</p>
-<h3>Nach „Vertrauen“ an einem anderen Energy Guard verbindet sich nichts</h3>
-<p>Nach einem Wechsel des vertrauten Energy Guards (oder nach „Vertrauen entziehen“ und neuem Vertrauen) baut die SteuVE die Verbindung zum neuen Gerät unter Umständen erst nach einem <b>Neustart</b> auf. Dann die SteuVE einmal neu starten.</p>
+<h3>Ein Energy Guard wird trotz „Vertrauen“ abgewiesen</h3>
+<p>Vertraut wird nur einer Verbindung, die die SteuVE über die Adresse des Energy Guards aus der Gerätesuche zuordnen kann. Ruft ein Energy Guard über eine andere Adresse an, als die Suche gefunden hat (z. B. ein Gerät mit mehreren IPv6-Adressen), werden seine Grenzen vorerst abgewiesen (Zähler „Abgewiesen“). Abhilfe: im Energy Guard bzw. Netz dafür sorgen, dass er über dieselbe Adresse anruft, oder per IPv4 verbinden.</p>
 <h3>Das HEMS legt die SteuVE als neues Gerät an</h3>
 <p>Das passiert nur mit einer neuen Identität (neue SKI). Zieht die SteuVE auf ein anderes Board um, Zertifikat und Schlüssel aus dem Flash mitnehmen – dann erkennt das HEMS das vorhandene Gerät wieder, auch mit anderer Adresse.</p>
 
