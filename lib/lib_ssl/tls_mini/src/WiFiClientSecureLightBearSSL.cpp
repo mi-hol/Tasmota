@@ -751,6 +751,17 @@ static uint8_t htoi (unsigned char c)
   else return 255;
 }
 
+#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE) || defined(USE_EEBUS_HEMS)
+// EEBUS/SHIP: oeffentlicher Schluessel der Gegenstelle beim letzten TLS-Aufbau als Client (s. ShipPeerPubKey im Header)
+static uint8_t ship_peer_pubkey[65];
+static size_t  ship_peer_pubkey_len = 0;
+
+const uint8_t *ShipPeerPubKey(size_t *len) {
+  if (len) { *len = ship_peer_pubkey_len; }
+  return ship_peer_pubkey;
+}
+#endif
+
 extern "C" {
 
   // see https://stackoverflow.com/questions/6357031/how-do-you-convert-a-byte-array-to-a-hexadecimal-string-in-c
@@ -874,6 +885,13 @@ extern "C" {
       sha1_update_len(&shactx, eckey.q, eckey.qlen);       // public point
 
       br_sha1_out(&shactx, xc->pubkey_recv_fingerprint); // copy to fingerprint
+#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE) || defined(USE_EEBUS_HEMS)
+      // EEBUS/SHIP: den Punkt fuer den Treiber aufheben, die SKI bildet der Treiber selbst
+      if (eckey.qlen <= sizeof(ship_peer_pubkey)) {
+        memcpy(ship_peer_pubkey, eckey.q, eckey.qlen);
+        ship_peer_pubkey_len = eckey.qlen;
+      }
+#endif
     }
   #endif
     else {
@@ -942,7 +960,7 @@ extern "C" {
   static const uint16_t suites_RSA_ONLY[] = {
     BR_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
   };
-#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE)   // SHIP-TLS fuer beide EEBUS-Treiber
+#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE) || defined(USE_EEBUS_HEMS)   // SHIP-TLS fuer alle EEBUS-Treiber (HEMS v001)
   // Cipher-Reihenfolge fuer SHIP: ECDSA zuerst. 0xC02F (RSA) ist kein SHIP-Cipher, bleibt aber am
   // Ende der Liste — diese Lib bedient auch HTTPS/MQTT zu RSA-Servern.
   static const uint16_t suites_eebus[] = {
@@ -965,7 +983,7 @@ extern "C" {
     br_ssl_engine_add_flags(&cc->eng, BR_OPT_NO_RENEGOTIATION);
 
     br_ssl_engine_set_versions(&cc->eng, BR_TLS12, BR_TLS12);
-#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE)   // SHIP-TLS fuer beide EEBUS-Treiber
+#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE) || defined(USE_EEBUS_HEMS)   // SHIP-TLS fuer alle EEBUS-Treiber (HEMS v001)
     // EEBUS-Build: die SHIP-taugliche Liste verwenden (s. suites_eebus oben).
     // ABER _rsa_only MUSS weiter greifen: wer RSA erzwingt, tut das, um einen RSA-Fingerabdruck
     // pruefen zu koennen. Bekaeme er zusaetzlich ECDSA-Suiten angeboten, koennte der Server ECDSA
@@ -996,7 +1014,7 @@ extern "C" {
     br_ssl_engine_set_gcm(&cc->eng, &br_sslrec_in_gcm_vtable, &br_sslrec_out_gcm_vtable);
     br_ssl_engine_set_aes_ctr(&cc->eng, &br_aes_small_ctr_vtable);
     br_ssl_engine_set_ghash(&cc->eng, &br_ghash_ctmul32);
-#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE)   // SHIP-TLS fuer beide EEBUS-Treiber
+#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE) || defined(USE_EEBUS_HEMS)   // SHIP-TLS fuer alle EEBUS-Treiber (HEMS v001)
     // CBC-Engine registrieren: SHIP 9.1 fuehrt 0xC023 als Pflicht-Cipher, 0xC02B (GCM) nur als
     // Option. Rein additiv — GCM bleibt registriert, HTTPS/MQTT zu RSA-Servern unberuehrt.
     br_ssl_engine_set_cbc(&cc->eng, &br_sslrec_in_cbc_vtable, &br_sslrec_out_cbc_vtable);
@@ -1056,7 +1074,7 @@ bool WiFiClientSecure_light::_connectSSL(const char* hostName) {
     _eng = &_sc->eng; // Allocation/deallocation taken care of by the _sc shared_ptr
 
     br_ssl_client_base_init(_sc.get(), _rsa_only);
-#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE)   // SHIP-TLS fuer beide EEBUS-Treiber
+#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE) || defined(USE_EEBUS_HEMS)   // SHIP-TLS fuer alle EEBUS-Treiber (HEMS v001)
     // Suite-Liste NACH der Basis-Initialisierung ueberschreiben, nur fuer markierte Clients —
     // andere TLS-Nutzer bleiben unberuehrt.
     if (_ship_ciphers) {
@@ -1076,6 +1094,9 @@ bool WiFiClientSecure_light::_connectSSL(const char* hostName) {
     //x509_insecure = std::unique_ptr<br_x509_pubkeyfingerprint_context>(new br_x509_pubkeyfingerprint_context);
     if (!x509_insecure) break;
     br_x509_pubkeyfingerprint_init(x509_insecure, _fingerprint1, _fingerprint2, _recv_fingerprint, _fingerprint_any);
+#if defined(USE_EEBUS_GUARD) || defined(USE_EEBUS_STEUVE) || defined(USE_EEBUS_HEMS)
+    ship_peer_pubkey_len = 0;   // EEBUS: Schluessel der Gegenstelle neu aufnehmen (ShipPeerPubKey)
+#endif
     br_ssl_engine_set_x509(_eng, &x509_insecure->vtable);
 
     if (!_insecure) {

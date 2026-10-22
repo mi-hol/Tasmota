@@ -10,6 +10,17 @@
   SteuVE v018 (21.10.2026): eine ueber die Kennung zugeordnete SKI zaehlt NICHT fuer das Vertrauen (EebusCsTrusted) -
     Hinweis gemu: die Kennung sendet das Gegenueber selbst; ohne SKI-Pruefung am Zertifikat sonst leichter zu faelschen.
   SteuVE v020 (21.10.2026): kein Absturz mehr beim Anrufen eines Geraets, das nur IPv6 meldet (wie Steuerbox v189).
+  SteuVE v021 (22.10.2026): Identitaet der Gegenstelle ueber die SKI aus IHREM ZERTIFIKAT, nicht mehr ueber die IP
+    (wie HEMS v006/v007, Steuerbox v190/v192). Ruft jemand an, fordert der TLS-Server das Client-Zertifikat an
+    (leerer Name, BR_OPT_TOLERATE_NO_CLIENT_AUTH), EebusSrvX509 nimmt den EC-Schluessel, SKI = SHA-1 ueber den Punkt.
+    Ruft die SteuVE selbst an, wird die Zertifikats-SKI (tls_mini getRecvPubKeySki) mit der Fundliste verglichen;
+    passt sie nicht: keine Verbindung. EEBusStatus zeigt je Slot "SkiQuelle". Damit weist die SteuVE ein HEMS, das
+    sie vor ihrer Fundliste anruft, nicht mehr als Pseudo-SKI (Adresse) ab (22.10. 10:16).
+    Ausserdem: ein Write auf eine andere limitId als 1 (unsere einzige Grenze) wird ignoriert und ins Log geschrieben.
+  SteuVE v022 (22.10.2026, Bedingungen gemu): Vertrauen (Grenzen, Failsafe, Herzschlag, Abo) NUR, wenn sich der
+    vertraute Energy Guard mit Zertifikat ausgewiesen hat (SkiQuelle Zertifikat). Ohne Zertifikat: angezeigt, aber
+    Writes abgewiesen, Log "vertraut nicht, kein Zertifikat". Schalter EEBusCsStreng 0 nur fuer Tests (nicht gespeichert).
+    tls_mini liefert nur noch den oeffentlichen Schluessel (BearSSL::ShipPeerPubKey), die SKI bildet der Treiber.
   SteuVE v019 (21.10.2026): EEBusCsTrust <ski> sucht den neuen Energy Guard sofort (Wiederaufbau + neue mDNS-Ankuendigung),
     ohne Neustart; EEBusCsTrust 0 vergisst den gemerkten Partner, wenn es der alte Energy Guard war.
   SHIP/TLS/Discovery/Herzschlag/Wiederaufbau sind die bewaehrten Teile der Steuerbox; die
@@ -33,6 +44,8 @@
                                   <ski> = volle SKI oder eindeutiger Anfang aus der Fundliste, hm = der
                                   Energiemanager der Fundliste, 0 = Vertrauen entziehen (trennt sofort).
                                   Ohne Argument: aktueller Stand. Flash /eebus_cs_trust.txt (SteuVE v006)
+    EEBusCsStreng [1|0]           1 (Vorgabe) = vertraut nur mit Zertifikat, 0 = auch ueber Adresse (NUR TEST,
+                                  nicht gespeichert) - SteuVE v022
     EEBusCsTyp [wp|wallbox|steuerbox|0|1|2]  Kennung, mit der sich die SteuVE im Netz und in der Discovery vorstellt
                                   (SteuVE v007, Flash /eebus_cs_typ.txt). Vorgabe wp. Werte wie bei den echten Geraeten:
                                     1 wp        mDNS Gateway/cat 4, deviceType Generic, Entity HeatPumpAppliance (wie ein Waermepumpen-Gateway)
@@ -269,7 +282,7 @@ const char kEebusCommands[] PROGMEM = D_PRFX_EEBUS "|"   // Prefix
   "Scan|Peers|Cert|Connect|Disconnect|Status|Trust|ConnectIp|Advertise|Log|"
   "Role|Lpc|ReleaseAll|Release|Target|Probe|Provide|Open|Hems|PeerMode|DelDur|"
   "LppFrei|Lpp|Anmeld|Data|Mess|Struct|Read|AutoConn|"
-  "CsPower|CsMax|CsFs|CsSim|CsTrust|CsTyp|CsMsg|Cs";   // ReleaseAll VOR Release, LppFrei VOR Lpp, Cs* VOR Cs (Praefix-Match!)
+  "CsPower|CsMax|CsFs|CsSim|CsTrust|CsStreng|CsTyp|CsMsg|Cs";   // ReleaseAll VOR Release, LppFrei VOR Lpp, Cs* VOR Cs (Praefix-Match!)
 
 void (* const EebusCommand[])(void) PROGMEM = {
   &CmndEebusScan, &CmndEebusPeers, &CmndEebusCert,
@@ -280,7 +293,7 @@ void (* const EebusCommand[])(void) PROGMEM = {
   &CmndEebusPeerMode, &CmndEebusDelDur,
   &CmndEebusLppFrei, &CmndEebusLpp, &CmndEebusAnmeld, &CmndEebusData,
   &CmndEebusMess, &CmndEebusStruct, &CmndEebusRead, &CmndEebusAutoConn,
-  &CmndEebusCsPower, &CmndEebusCsMax, &CmndEebusCsFs, &CmndEebusCsSim, &CmndEebusCsTrust, &CmndEebusCsTyp, &CmndEebusCsMsg, &CmndEebusCs };   // SteuVE v004, CsTrust v006, CsTyp v007, CsMsg v009
+  &CmndEebusCsPower, &CmndEebusCsMax, &CmndEebusCsFs, &CmndEebusCsSim, &CmndEebusCsTrust, &CmndEebusCsStreng, &CmndEebusCsTyp, &CmndEebusCsMsg, &CmndEebusCs };   // SteuVE v004, CsTrust v006, CsTyp v007, CsMsg v009
 
 // Blind-Adressierung (Waermepumpen-Gateway liefert ihre Discovery nicht — VR940-Karte als Vorlage:
 // LoadControl/server auf entity 3 "HeatPumpAppliance"):
@@ -335,6 +348,7 @@ void EebusCsSetState(uint8_t s);        // SteuVE v002: Vorwaertsdeklaration (Au
 #define EEBUS_CS_TRUST_FILE    "/eebus_cs_trust.txt"
 char     eebus_cs_trust[41]  = "";      // vertraute SKI (40 Hex, klein) oder leer
 bool     eebus_cs_trust_loaded = false;
+bool     eebus_cs_streng = true;      // SteuVE v022 (gemu 22.10.): vertraut nur mit SkiQuelle Zertifikat (EEBusCsStreng)
 uint32_t eebus_cs_rej_cnt    = 0;       // abgewiesene Writes seit dem Start
 char     eebus_cs_rej_from[46] = "";    // IP des zuletzt abgewiesenen Absenders (SteuVE v016: IPv6)
 void EebusDisconnectNow(void);          // SteuVE v006: Vorwaertsdeklaration (EebusCsDropSki steht davor)
@@ -1710,6 +1724,7 @@ typedef struct {
    // SteuVE v018: SKI kam ueber die (vom Gegenueber selbst gesendete) AccessMethods-Kennung, nicht ueber die Adresse.
    // Gilt NICHT fuer das Vertrauen (EebusCsTrusted) - die SKI wird nicht gegen das TLS-Zertifikat geprueft.
   bool     ski_aus_id = false;
+  uint8_t  ski_quelle = 0;   // SteuVE v021: woher peer_ski kommt - 0 Fundliste (mDNS), 1 Zertifikat, 2 Adresse (Rueckfall)
 } EebusConn;
 
 EebusConn EConn[EEBUS_MAX_CONN];   // die 3 Verbindungs-Slots
@@ -2107,6 +2122,7 @@ bool EebusShipConnect(int idx) {
   ESp->last_rx = millis();
   strlcpy(ESp->peer_ip, dst, sizeof(ESp->peer_ip));   // SteuVE v020: IPv4 oder (ersatzweise) IPv6
   strlcpy(ESp->peer_ski, p->ski, sizeof(ESp->peer_ski));   // Peer-Identitaet aus mDNS
+  ESp->ski_quelle = 0;   // SteuVE v021: ausgehend - SKI aus der Fundliste, Pruefung gegen das Zertifikat nach dem TLS-Aufbau
   EebusModeApply(ESp->peer_ski);   // Betriebsmodus (HEMS/SteuVE) aus SKI-Zuordnung
   ESp->peer_port = p->port;
 
@@ -2160,6 +2176,32 @@ bool EebusShipConnect(int idx) {
   }
   ESp->state = SHIP_TLS_OK;
   EebusHeapCheck("tls_handshake");   // Checkpunkt: nach BearSSL-TLS-Handshake (inkl. ECDSA-Signieren)
+   // SteuVE v021: Ist die Gegenstelle wirklich das Geraet mit dieser SKI? Die SKI aus der Fundliste hat das Geraet nur
+   // angekuendigt - das Zertifikat beweist sie (BearSSL hat die Signatur im Handshake geprueft).
+  {
+    size_t klen = 0;
+    const uint8_t *kp = BearSSL::ShipPeerPubKey(&klen);   // SteuVE v022 (gemu 22.10.): tls_mini liefert den Punkt, die SKI bilden wir
+    char zski[41] = { 0 };
+    if (65 == klen) {
+      uint8_t h[20];
+      br_sha1_context sc;
+      br_sha1_init(&sc);
+      br_sha1_update(&sc, kp, 65);   // wie EebusSkiRawFromKey: SHA-1 ueber 04||X||Y
+      br_sha1_out(&sc, h);
+      for (uint32_t i = 0; i < 20; i++) { snprintf_P(zski + (i * 2), 3, PSTR("%02x"), h[i]); }
+    }
+    if (!zski[0]) {
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: %s: Zertifikat ohne EC-Schluessel - SKI nur aus der Fundliste, nicht vertraut"), ESp->peer_ip);
+    } else if (0 != strcasecmp(zski, ESp->peer_ski)) {
+      AddLog(LOG_LEVEL_ERROR, PSTR("EBG: %s: Zertifikat hat SKI %s, erwartet %s - NICHT verbunden"),
+             ESp->peer_ip, zski, ESp->peer_ski);
+      strlcpy(ESp->err, "SKI passt nicht zum Zertifikat", sizeof(ESp->err));
+      goto fail;
+    } else {
+      ESp->ski_quelle = 1;
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: %s: SKI %s durch Zertifikat bestaetigt"), ESp->peer_ip, ESp->peer_ski);
+    }
+  }
 
    // WebSocket-Upgrade (Subprotocol "ship")
   if (!EebusWsUpgrade(dst_host, p->port, p->path)) { goto fail; }   // err bereits gesetzt (SteuVE v020: IPv6 in [])
@@ -3286,7 +3328,10 @@ bool EebusCsTrusted(void) {
    // SteuVE v018: eine ueber die Kennung zugeordnete SKI zaehlt NICHT (die Kennung sendet das Gegenueber selbst, und
    // die SKI wird nicht gegen das Zertifikat geprueft) - sonst koennte jedes Geraet im LAN mit der oeffentlichen
    // mDNS-Kennung des Energy Guards Grenzen/Failsafe schreiben. Gilt, bis die SKI am Zertifikat geprueft wird.
-  return eebus_cs_trust[0] && !ESp->ski_aus_id && (0 == strcasecmp(ESp->peer_ski, eebus_cs_trust));
+   // SteuVE v022 (gemu 22.10.): streng = nur, wenn sich die Gegenstelle mit Zertifikat ausgewiesen hat (SkiQuelle 1).
+   // Ohne Zertifikat kaeme ein Angreifer sonst wieder ueber Adresse/Fundliste an die alte Zuordnung.
+  return eebus_cs_trust[0] && !ESp->ski_aus_id && (0 == strcasecmp(ESp->peer_ski, eebus_cs_trust)) &&
+         (!eebus_cs_streng || (1 == ESp->ski_quelle));
 }
 
 // SteuVE v006: alle Verbindungen zu dieser SKI trennen (Vertrauen entzogen / gewechselt).
@@ -3648,6 +3693,17 @@ void CmndEebusCsMsg(void) {
   }
   ResponseAppend_P(PSTR("],\"Ges\":%u,\"Seite\":%u,\"Seiten\":%u}}"), eebus_msg_cnt, seite,
                    (eebus_msg_cnt + EEBUS_MSG_SEITE - 1) / EEBUS_MSG_SEITE);
+}
+
+// EEBusCsStreng [1|0] - SteuVE v022 (gemu 22.10.): 1 (Vorgabe) = Grenzen, Failsafe, Herzschlag nur vom vertrauten
+// Energy Guard, wenn er sich mit Zertifikat ausgewiesen hat. 0 = auch ueber Adresse/Fundliste - NUR fuer Tests mit
+// Geraeten ohne Client-Zertifikat. Nicht gespeichert: nach einem Neustart gilt wieder 1.
+void CmndEebusCsStreng(void) {
+  if (XdrvMailbox.data_len > 0) {
+    eebus_cs_streng = (0 != XdrvMailbox.payload);
+    AddLog(LOG_LEVEL_INFO, PSTR("EBG: SteuVE: Vertrauen %s"), eebus_cs_streng ? "nur mit Zertifikat (streng)" : "auch ohne Zertifikat - NUR TEST");
+  }
+  ResponseCmndNumber(eebus_cs_streng ? 1 : 0);
 }
 
 // EEBusCsTyp [wp|wallbox|steuerbox|0|1|2] — SteuVE v007: Kennung umstellen, speichern, sofort neu ankuendigen.
@@ -4978,7 +5034,14 @@ void EebusSpineHandle(const char *json) {
       AddLog(LOG_LEVEL_INFO, PSTR("EBG: *** LPC-LIMIT vom Steuergeraet %s empfangen: %s W (aktiv=%s) ***"),
              ESp->peer_ip, have ? itoa((int)number, nbuf, 10) : "?", active[0] ? active : "?");
       if (3 == eebus_role) {   // SteuVE v001: als SteuVE uebernehmen — v006: nur vom vertrauten Energy Guard
-        if (EebusCsTrusted()) { EebusCsApplyLimitWrite(json); } else { cs_abgewiesen = true; }
+        uint32_t lid = 1;   // SteuVE v021: unsere einzige Grenze ist limitId 1 (Bezug) - andere nicht als Bezug uebernehmen
+        EebusJsonInt(strstr(json, "loadControlLimitListData"), "limitId", &lid);
+        if (!EebusCsTrusted()) { cs_abgewiesen = true; }
+        else if (1 != lid) {
+          AddLog(LOG_LEVEL_INFO, PSTR("EBG: SteuVE: Write von %s auf limitId %u ignoriert - wir haben nur limitId 1 (Bezug)"),
+                 ESp->peer_ip, lid);
+        }
+        else { EebusCsApplyLimitWrite(json); }
       }
     }
     if ((3 == eebus_role) && strstr(json, "deviceConfigurationKeyValueListData")) {
@@ -4987,8 +5050,8 @@ void EebusSpineHandle(const char *json) {
     if (cs_abgewiesen) {   // SteuVE v006
       eebus_cs_rej_cnt++;
       strlcpy(eebus_cs_rej_from, ESp->peer_ip, sizeof(eebus_cs_rej_from));
-      AddLog(LOG_LEVEL_INFO, PSTR("EBG: SteuVE: Write von %s (SKI %s) ABGEWIESEN - nicht vertraut (EEBusCsTrust)"),
-             ESp->peer_ip, ESp->peer_ski);
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: SteuVE: Write von %s (SKI %s) ABGEWIESEN - %s"), ESp->peer_ip, ESp->peer_ski,
+             (eebus_cs_streng && (1 != ESp->ski_quelle)) ? "vertraut nicht, kein Zertifikat" : "nicht vertraut (EEBusCsTrust)");   // SteuVE v022
       EebusMsgSetLast("abgewiesen - nicht vertraut", 2);   // SteuVE v009
     }
    // Quittung an das ABSENDER-Feature des Peers (nicht pauschal an sein NodeManagement) — s.u.
@@ -5826,9 +5889,10 @@ void CmndEebusStatus(void) {
                  cc->peer_hb_tmo_s, cc->hb_lost_cnt, cc->hb_lost_at);
     }
     ResponseAppend_P(PSTR("%s{\"Slot\":%d,\"State\":\"%s\",\"Sme\":\"%s\",\"Ip\":\"%s\",\"Port\":%u,"
-                          "\"PeerSki\":\"%s\",\"PeerId\":\"%s\",\"Lpc\":\"%s\",\"LpcResult\":\"%s\",%s\"Error\":\"%s\"}"),
+                          "\"PeerSki\":\"%s\",\"SkiQuelle\":\"%s\",\"PeerId\":\"%s\",\"Lpc\":\"%s\",\"LpcResult\":\"%s\",%s\"Error\":\"%s\"}"),
                      (i) ? "," : "", i, st, EebusSmeName(cc->sme), cc->peer_ip, cc->peer_port,
-                     cc->peer_ski, cc->peer_id, EebusLpcName(cc->lpc_state), cc->lpc_result, hbinfo, cc->err);
+                     cc->peer_ski, (1 == cc->ski_quelle) ? "Zertifikat" : (2 == cc->ski_quelle) ? "Adresse" : "Fundliste",   // SteuVE v021
+                     cc->peer_id, EebusLpcName(cc->lpc_state), cc->lpc_result, hbinfo, cc->err);
   }
   ResponseAppend_P(PSTR("]}}"));
 }
@@ -6798,6 +6862,63 @@ NetworkServer *EebusInboundSrv = nullptr;
 #define EEBUS_SRV_TIMEOUT_MS  30000UL
 #define EEBUS_SRV_DATA_TIMEOUT_MS  90000UL   // Datenphase — Peers duerfen laenger schweigen
 
+// SteuVE v021 (wie HEMS v006): X.509-Leser fuer das Zertifikat des Anrufers. Keine CA-Pruefung (SHIP-Zertifikate sind
+// selbst signiert) - es zaehlt der Schluessel: BearSSL prueft damit die CertificateVerify-Signatur des Anrufers, also
+// dass er den geheimen Schluessel zu dieser SKI besitzt. Nur das erste Zertifikat der Kette wird gelesen.
+typedef struct {
+  const br_x509_class *vtable;
+  br_x509_decoder_context dc;
+  uint8_t  n_cert;
+  bool     have;
+  char     ski[41];
+} EebusSrvX509;
+
+void EebusSrvX509StartChain(const br_x509_class **ctx, const char *server_name) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  x->n_cert = 0; x->have = false; x->ski[0] = '\0';
+}
+void EebusSrvX509StartCert(const br_x509_class **ctx, uint32_t length) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  if (0 == x->n_cert) { br_x509_decoder_init(&x->dc, nullptr, nullptr, nullptr, nullptr); }
+}
+void EebusSrvX509Append(const br_x509_class **ctx, const unsigned char *buf, size_t len) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  if (0 == x->n_cert) { br_x509_decoder_push(&x->dc, buf, len); }
+}
+void EebusSrvX509EndCert(const br_x509_class **ctx) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  if (0 == x->n_cert) {
+    br_x509_pkey *pk = br_x509_decoder_get_pkey(&x->dc);
+    if (pk && (BR_KEYTYPE_EC == pk->key_type) && (65 == pk->key.ec.qlen)) {
+      uint8_t h[20];
+      br_sha1_context sc;
+      br_sha1_init(&sc);
+      br_sha1_update(&sc, pk->key.ec.q, 65);   // wie EebusSkiRawFromKey: SHA-1 ueber 04||X||Y
+      br_sha1_out(&sc, h);
+      for (uint32_t i = 0; i < 20; i++) { snprintf_P(x->ski + (i * 2), 3, PSTR("%02x"), h[i]); }
+      x->have = true;
+    }
+  }
+  x->n_cert++;
+}
+unsigned EebusSrvX509EndChain(const br_x509_class **ctx) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  return x->have ? 0 : BR_ERR_X509_UNSUPPORTED;   // kein EC-Schluessel lesbar -> Handshake bricht ab
+}
+const br_x509_pkey *EebusSrvX509GetPkey(const br_x509_class *const *ctx, unsigned *usages) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  if (usages) { *usages = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN; }
+  return x->have ? br_x509_decoder_get_pkey(&x->dc) : nullptr;
+}
+const br_x509_class EebusSrvX509Vtable = {
+  sizeof(EebusSrvX509), EebusSrvX509StartChain, EebusSrvX509StartCert, EebusSrvX509Append,
+  EebusSrvX509EndCert, EebusSrvX509EndChain, EebusSrvX509GetPkey
+};
+// Ein leerer Name (DER: leere SEQUENCE). BearSSL fragt nur dann nach einem Client-Zertifikat, wenn mindestens ein
+// Name gesetzt ist; welcher, ist fuer selbst signierte SHIP-Zertifikate egal.
+static const unsigned char eebus_srv_dn_leer[2] = { 0x30, 0x00 };
+static const br_x500_name eebus_srv_dn[1] = { { (unsigned char *)eebus_srv_dn_leer, 2 } };
+
 typedef struct {
   bool     active = false;
   bool     hs_done = false;
@@ -6823,6 +6944,7 @@ typedef struct {
   uint8_t  sme_state = 0;   // 0=warte Hello, 1=warte announceMax, 2=warte select-Spiegel, 3=DONE
    // Etappe 4: Verknuepfung mit einem EConn-Slot (SPINE-Datenphase)
   int      conn_idx = -1;   // Index in EConn[] (-1 = nicht verknuepft)
+  EebusSrvX509 *x509 = nullptr;   // SteuVE v021: Zertifikat des Anrufers (DRAM, ~0,8 KB)
 } EebusSrvSlot;
 EebusSrvSlot ESrv;   // Etappe 1: EINE eingehende Verbindung
 
@@ -6846,6 +6968,7 @@ void EebusSrvFree(void) {
   if (ESrv.sock) { ESrv.sock.stop(); }
   ESrv.sock = NetworkClient();   // Socket-Handle loslassen (shared)
   if (ESrv.sc)       { free(ESrv.sc);       ESrv.sc = nullptr; }
+  if (ESrv.x509)     { free(ESrv.x509);     ESrv.x509 = nullptr; }   // SteuVE v021
   if (ESrv.ibuf)     { free(ESrv.ibuf);     ESrv.ibuf = nullptr; }
   if (ESrv.obuf)     { free(ESrv.obuf);     ESrv.obuf = nullptr; }
   if (ESrv.cert_der) { free(ESrv.cert_der); ESrv.cert_der = nullptr; }
@@ -6872,6 +6995,7 @@ bool EebusSrvStart(void) {
   ESrv.ibuf = (unsigned char*)malloc(EEBUS_SRV_IBUF);
   ESrv.obuf = (unsigned char*)malloc(EEBUS_SRV_OBUF);
   ESrv.cert_der = (uint8_t*)malloc(EEBUS_CERT_DER_SIZE);
+  ESrv.x509 = (EebusSrvX509*)calloc(1, sizeof(EebusSrvX509));   // SteuVE v021
   ESrv.abuf = (uint8_t*)special_malloc(EEBUS_SRV_ABUF);   // 32 KB -> PSRAM (DRAM schonen), wird wie bisher per free() freigegeben
   ESrv.abuf_len = 0;
   ESrv.sbuf = (uint8_t*)special_malloc(EEBUS_SRV_SBUF);   // SteuVE v015, PSRAM
@@ -6881,7 +7005,7 @@ bool EebusSrvStart(void) {
   ESrv.sme_state = 0;
   ESrv.conn_idx = -1;
   if ((nullptr == ESrv.sc) || (nullptr == ESrv.ibuf) || (nullptr == ESrv.abuf) || (nullptr == ESrv.sbuf) ||
-      (nullptr == ESrv.obuf) || (nullptr == ESrv.cert_der)) { why = "malloc"; goto fail; }
+      (nullptr == ESrv.obuf) || (nullptr == ESrv.cert_der) || (nullptr == ESrv.x509)) { why = "malloc"; goto fail; }   // SteuVE v021: x509
   ESrv.cert_len = EebusLoadDer(EEBUS_CERT_FILE, ESrv.cert_der, EEBUS_CERT_DER_SIZE);
   if (0 == ESrv.cert_len) { why = "cert load"; goto fail; }
   if (!EebusKeyScalar(ESrv.key_scalar)) { why = "key scalar"; goto fail; }
@@ -6923,6 +7047,13 @@ bool EebusSrvStart(void) {
                                 BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN, BR_KEYTYPE_EC,
                                 &br_ec_p256_m15, br_ecdsa_sign_asn1_get_default());
     br_ssl_engine_set_buffers_bidi(eng, ESrv.ibuf, EEBUS_SRV_IBUF, ESrv.obuf, EEBUS_SRV_OBUF);
+   // SteuVE v021: Zertifikat des Anrufers anfordern und lesen. Ohne Zertifikat (fremdes Geraet, das bei einer nicht
+   // passenden Namensliste keins schickt) laeuft der Handshake weiter - dann Rueckfall auf die Fundliste (IP).
+    ESrv.x509->vtable = &EebusSrvX509Vtable;
+    br_ssl_engine_set_x509(eng, &ESrv.x509->vtable);
+    br_ssl_engine_set_ecdsa(eng, br_ecdsa_vrfy_asn1_get_default());   // CertificateVerify des Anrufers pruefen
+    br_ssl_server_set_trust_anchor_names(ESrv.sc, eebus_srv_dn, 1);
+    br_ssl_engine_add_flags(eng, BR_OPT_TOLERATE_NO_CLIENT_AUTH);
     if (!br_ssl_server_reset(ESrv.sc)) {
       AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV reset fehlgeschlagen, err=%d"),
              br_ssl_engine_last_error(eng));
@@ -7171,10 +7302,24 @@ void EebusSrvLinkConn(void) {
   cc->last_rx = millis();
   strlcpy(cc->peer_ip, ESrv.peer_ip, sizeof(cc->peer_ip));
   strlcpy(cc->peer_ski, ESrv.peer_ip, sizeof(cc->peer_ski));   // Pseudo-SKI (s.o.)
+  cc->ski_quelle = 2;   // SteuVE v021: erst einmal Rueckfall (Adresse)
+  cc->ski_aus_id = false;
+  bool ski_zert = ESrv.x509 && ESrv.x509->have;   // SteuVE v021: der Anrufer hat sich mit Zertifikat ausgewiesen
+  if (ski_zert) {
+    strlcpy(cc->peer_ski, ESrv.x509->ski, sizeof(cc->peer_ski));
+    cc->ski_quelle = 1;
+    for (uint32_t k = 0; k < Eebus.peer_count; k++) {   // Port/Index nur zur Anzeige, die Identitaet steht schon
+      if (0 == strcasecmp(Eebus.peers[k].ski, cc->peer_ski)) { cc->peer_idx = (int)k; cc->peer_port = Eebus.peers[k].port; break; }
+    }
+    EebusModeApply(cc->peer_ski);
+    AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s weist sich mit Zertifikat aus: SKI %s"), ESrv.peer_ip, cc->peer_ski);
+  } else {
+    AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s ohne Zertifikat - nur ueber die Adresse (Fundliste) zuzuordnen"), ESrv.peer_ip);
+  }
    // Echte SKI des Anrufers ueber seine IP aus der Scan-Liste nachtragen, damit er wie im Client-Weg
    // erkannt wird (Betriebsart HEMS/SteuVE, Anzeige, Wiederaufbau sieht die bestehende Verbindung).
    // Nicht in der Liste -> Pseudo-SKI bleibt, globaler Default gilt.
-  for (uint32_t k = 0; k < Eebus.peer_count; k++) {
+  for (uint32_t k = 0; !ski_zert && (k < Eebus.peer_count); k++) {   // SteuVE v021: nur noch Rueckfall ohne Zertifikat
     if ((0 == strcmp(Eebus.peers[k].ip, ESrv.peer_ip)) ||
         (Eebus.peers[k].ip6[0] && (0 == strcasecmp(Eebus.peers[k].ip6, ESrv.peer_ip)))) {   // SteuVE v016: auch IPv6
       strlcpy(cc->peer_ski, Eebus.peers[k].ski, sizeof(cc->peer_ski));

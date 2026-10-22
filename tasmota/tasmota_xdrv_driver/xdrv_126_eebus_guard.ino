@@ -460,6 +460,20 @@ static const uint16_t kEebusLateReadS[3] = { 60, 180, 420 };
 // 2 min danach wieder verbunden.
 static const uint16_t kEebusKaWaitS[6] = { 8, 15, 30, 60, 120, 120 };
 
+// v193 (22.10., Wunsch gemu): tls_mini liefert nur noch den oeffentlichen Schluessel der Gegenstelle (BearSSL::ShipPeerPubKey,
+// alles hinter USE_EEBUS_*, ein Bau ohne EEBUS bleibt byte-gleich), die SKI bildet der Treiber (SHA-1 ueber den Punkt).
+// Ohne EC-Schluessel im Zertifikat: Log "nicht vertraut". Sonst unveraendert zu v192.
+// v192 (22.10.): Auch beim EIGENEN Anruf wird die SKI aus dem Zertifikat der Gegenstelle geprueft (tls_mini
+// getRecvPubKeySki). Passt sie nicht zur SKI aus der Fundliste, wird nicht verbunden. Passt sie, steht SkiQuelle
+// "Zertifikat". Damit ist die Identitaet in beiden Richtungen an das Zertifikat gebunden (Konstruktionsfehler seit 31.07.).
+// v191 (22.10.): Ein Anrufer, der sich mit Zertifikat ausgewiesen hat (v190, SkiQuelle "Zertifikat"), wird jetzt auch
+// als Wiederaufbau-Partner gemerkt. Bisher nur eigene Anrufe - eingehend stand frueher nur die IP als Pseudo-SKI. Anlass:
+// HM rief an, Steuerbox merkte ihn nicht, nach dem naechsten Neustart suchte sie nichts (22.10. 11:56, HM rief nicht zurueck).
+// v190 (22.10., aus HEMS v006): Ein Anrufer wird an der SKI aus SEINEM ZERTIFIKAT erkannt, nicht mehr an der IP.
+// Der TLS-Server fordert das Client-Zertifikat an (leerer Name, BR_OPT_TOLERATE_NO_CLIENT_AUTH), EebusSrvX509 liest den
+// EC-Schluessel, SKI = SHA-1 ueber den Punkt; BearSSL prueft die CertificateVerify-Signatur. Ohne Zertifikat gilt der
+// alte Weg (Fundliste/IP, v185/v188) als Rueckfall. EEBusStatus zeigt je Slot "SkiQuelle". Konstruktionsfehler seit
+// 31.07.: die Identitaet hing an der Adresse (Brief an gemu 22.10. 11:29).
 // v189 (21.10.): Absturz beim Anrufen eines Geraets, das per mDNS nur IPv6 meldet (fromString("") -> fail -> stop() auf
 // nie verbundenem TLS-Client -> Load access fault). Zieladresse vorher pruefen, ersatzweise IPv6, sonst kein Versuch.
 // v188 (21.10.): eingehende Verbindung zusaetzlich ueber die AccessMethods-Kennung der SKI zuordnen (EebusSrvSkiFromId),
@@ -1476,6 +1490,7 @@ typedef struct {
    // dann ueber EebusSrvWsSendOp (unmaskiert), RX kommt aus der ESrv-Pumpe; client/rxbuf
    // bleiben nullptr. Timeout/Close verwaltet das ESrv-Modul, nicht EebusSmePoll.
   bool     via_srv = false;
+  uint8_t  ski_quelle = 0;   // v190: woher peer_ski kommt - 0 Fundliste (mDNS), 1 Zertifikat, 2 Adresse (Rueckfall)
 } EebusConn;
 
 EebusConn EConn[EEBUS_MAX_CONN];   // die 3 Verbindungs-Slots
@@ -1921,6 +1936,7 @@ bool EebusShipConnect(int idx) {
   ESp->last_rx = millis();
   strlcpy(ESp->peer_ip, dst, sizeof(ESp->peer_ip));   // v189: IPv4 oder (ersatzweise) IPv6
   strlcpy(ESp->peer_ski, p->ski, sizeof(ESp->peer_ski));   // Peer-Identitaet aus mDNS
+  ESp->ski_quelle = 0;   // v190: ausgehend - SKI aus der Fundliste (Pruefung gegen das Zertifikat folgt, HEMS-Plan Schritt 2)
   EebusModeApply(ESp->peer_ski);   // Betriebsmodus (HEMS/SteuVE) aus SKI-Zuordnung
   ESp->peer_port = p->port;
 
@@ -1975,6 +1991,32 @@ bool EebusShipConnect(int idx) {
   }
   ESp->state = SHIP_TLS_OK;
   EebusHeapCheck("tls_handshake");   // Checkpunkt: nach BearSSL-TLS-Handshake (inkl. ECDSA-Signieren)
+   // v192: Ist die Gegenstelle wirklich das Geraet mit dieser SKI? Die SKI aus der Fundliste hat das Geraet nur
+   // angekuendigt - das Zertifikat beweist sie (BearSSL hat die Signatur im Handshake geprueft).
+  {
+    size_t klen = 0;
+    const uint8_t *kp = BearSSL::ShipPeerPubKey(&klen);   // v193 (gemu 22.10.): tls_mini liefert den Punkt, die SKI bilden wir
+    char zski[41] = { 0 };
+    if (65 == klen) {
+      uint8_t h[20];
+      br_sha1_context sc;
+      br_sha1_init(&sc);
+      br_sha1_update(&sc, kp, 65);   // wie EebusSkiRawFromKey: SHA-1 ueber 04||X||Y
+      br_sha1_out(&sc, h);
+      for (uint32_t i = 0; i < 20; i++) { snprintf_P(zski + (i * 2), 3, PSTR("%02x"), h[i]); }
+    }
+    if (!zski[0]) {
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: %s: Zertifikat ohne EC-Schluessel - SKI nur aus der Fundliste, nicht vertraut"), ESp->peer_ip);
+    } else if (0 != strcasecmp(zski, ESp->peer_ski)) {
+      AddLog(LOG_LEVEL_ERROR, PSTR("EBG: %s: Zertifikat hat SKI %s, erwartet %s - NICHT verbunden"),
+             ESp->peer_ip, zski, ESp->peer_ski);
+      strlcpy(ESp->err, "SKI passt nicht zum Zertifikat", sizeof(ESp->err));
+      goto fail;
+    } else {
+      ESp->ski_quelle = 1;
+      AddLog(LOG_LEVEL_INFO, PSTR("EBG: %s: SKI %s durch Zertifikat bestaetigt"), ESp->peer_ip, ESp->peer_ski);
+    }
+  }
 
    // WebSocket-Upgrade (Subprotocol "ship")
   if (!EebusWsUpgrade(dst_host, p->port, p->path)) { goto fail; }   // err bereits gesetzt (v189: IPv6 in [])
@@ -4300,12 +4342,13 @@ void EebusSmeReachDone(const char *grund) {
    // Erst JETZT merken, nicht schon beim Verbinden: eine Verbindung, die es nicht bis in die
    // Datenphase schafft, ist kein Partner, den man beim naechsten Start wieder suchen sollte.
    // Server-Slots ausgenommen — dort steht die Peer-IP als Pseudo-SKI, die identifiziert niemanden.
+   // v191: AUSSER der Anrufer hat sich mit Zertifikat ausgewiesen (ski_quelle 1) - dann ist die SKI echt.
    // v181 (08.10.): NUR merken, wenn der bisher gemerkte Partner gerade NICHT verbunden ist. Sonst
    // wurde jede zusaetzliche Verbindung (z.B. kurz zum Waermepumpen-Gateway testen) zum Wiederaufbau-
    // Partner, obwohl der eigentliche Partner verbunden blieb — nach dem naechsten Stromausfall verband
    // sich die Box dann mit dem falschen Geraet (03.08. so beinahe passiert). Ein bewusster Wechsel
    // (alten Partner trennen, neuen verbinden) wird weiter gemerkt.
-  if (!ESp->via_srv) {
+  if (!ESp->via_srv || (1 == ESp->ski_quelle)) {   // v191
     bool alter_partner_da = false;
     if (eebus_ac_ski[0] && (0 != strcmp(eebus_ac_ski, ESp->peer_ski))) {
       for (uint32_t k = 0; k < EEBUS_MAX_CONN; k++) {
@@ -4831,9 +4874,10 @@ void CmndEebusStatus(void) {
                  cc->peer_hb_tmo_s, cc->hb_lost_cnt, cc->hb_lost_at);
     }
     ResponseAppend_P(PSTR("%s{\"Slot\":%d,\"State\":\"%s\",\"Sme\":\"%s\",\"Ip\":\"%s\",\"Port\":%u,"
-                          "\"PeerSki\":\"%s\",\"PeerId\":\"%s\",\"Lpc\":\"%s\",\"LpcResult\":\"%s\",%s\"Error\":\"%s\"}"),
+                          "\"PeerSki\":\"%s\",\"SkiQuelle\":\"%s\",\"PeerId\":\"%s\",\"Lpc\":\"%s\",\"LpcResult\":\"%s\",%s\"Error\":\"%s\"}"),
                      (i) ? "," : "", i, st, EebusSmeName(cc->sme), cc->peer_ip, cc->peer_port,
-                     cc->peer_ski, cc->peer_id, EebusLpcName(cc->lpc_state), cc->lpc_result, hbinfo, cc->err);
+                     cc->peer_ski, (1 == cc->ski_quelle) ? "Zertifikat" : (2 == cc->ski_quelle) ? "Adresse" : "Fundliste",   // v190
+                     cc->peer_id, EebusLpcName(cc->lpc_state), cc->lpc_result, hbinfo, cc->err);
   }
   ResponseAppend_P(PSTR("]}}"));
 }
@@ -5801,6 +5845,63 @@ NetworkServer *EebusInboundSrv = nullptr;
 #define EEBUS_SRV_TIMEOUT_MS  30000UL
 #define EEBUS_SRV_DATA_TIMEOUT_MS  90000UL   // Datenphase — Peers duerfen laenger schweigen
 
+// v190: X.509-Leser fuer das Zertifikat des Anrufers. Keine CA-Pruefung (SHIP-Zertifikate sind selbst
+// signiert) - es zaehlt der Schluessel: BearSSL prueft damit die CertificateVerify-Signatur des Anrufers, also dass
+// er den geheimen Schluessel zu dieser SKI besitzt. Nur das erste Zertifikat der Kette wird gelesen.
+typedef struct {
+  const br_x509_class *vtable;
+  br_x509_decoder_context dc;
+  uint8_t  n_cert;
+  bool     have;
+  char     ski[41];
+} EebusSrvX509;
+
+void EebusSrvX509StartChain(const br_x509_class **ctx, const char *server_name) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  x->n_cert = 0; x->have = false; x->ski[0] = '\0';
+}
+void EebusSrvX509StartCert(const br_x509_class **ctx, uint32_t length) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  if (0 == x->n_cert) { br_x509_decoder_init(&x->dc, nullptr, nullptr, nullptr, nullptr); }
+}
+void EebusSrvX509Append(const br_x509_class **ctx, const unsigned char *buf, size_t len) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  if (0 == x->n_cert) { br_x509_decoder_push(&x->dc, buf, len); }
+}
+void EebusSrvX509EndCert(const br_x509_class **ctx) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  if (0 == x->n_cert) {
+    br_x509_pkey *pk = br_x509_decoder_get_pkey(&x->dc);
+    if (pk && (BR_KEYTYPE_EC == pk->key_type) && (65 == pk->key.ec.qlen)) {
+      uint8_t h[20];
+      br_sha1_context sc;
+      br_sha1_init(&sc);
+      br_sha1_update(&sc, pk->key.ec.q, 65);   // wie EebusSkiRawFromKey: SHA-1 ueber 04||X||Y
+      br_sha1_out(&sc, h);
+      for (uint32_t i = 0; i < 20; i++) { snprintf_P(x->ski + (i * 2), 3, PSTR("%02x"), h[i]); }
+      x->have = true;
+    }
+  }
+  x->n_cert++;
+}
+unsigned EebusSrvX509EndChain(const br_x509_class **ctx) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  return x->have ? 0 : BR_ERR_X509_UNSUPPORTED;   // kein EC-Schluessel lesbar -> Handshake bricht ab
+}
+const br_x509_pkey *EebusSrvX509GetPkey(const br_x509_class *const *ctx, unsigned *usages) {
+  EebusSrvX509 *x = (EebusSrvX509 *)ctx;
+  if (usages) { *usages = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN; }
+  return x->have ? br_x509_decoder_get_pkey(&x->dc) : nullptr;
+}
+const br_x509_class EebusSrvX509Vtable = {
+  sizeof(EebusSrvX509), EebusSrvX509StartChain, EebusSrvX509StartCert, EebusSrvX509Append,
+  EebusSrvX509EndCert, EebusSrvX509EndChain, EebusSrvX509GetPkey
+};
+// Ein leerer Name (DER: leere SEQUENCE). BearSSL fragt nur dann nach einem Client-Zertifikat, wenn mindestens ein
+// Name gesetzt ist; welcher, ist fuer selbst signierte SHIP-Zertifikate egal.
+static const unsigned char eebus_srv_dn_leer[2] = { 0x30, 0x00 };
+static const br_x500_name eebus_srv_dn[1] = { { (unsigned char *)eebus_srv_dn_leer, 2 } };
+
 typedef struct {
   bool     active = false;
   bool     hs_done = false;
@@ -5824,6 +5925,7 @@ typedef struct {
   uint8_t  sme_state = 0;   // 0=warte Hello, 1=warte announceMax, 2=warte select-Spiegel, 3=DONE
    // Etappe 4: Verknuepfung mit einem EConn-Slot (SPINE-Datenphase)
   int      conn_idx = -1;   // Index in EConn[] (-1 = nicht verknuepft)
+  EebusSrvX509 *x509 = nullptr;   // v190: Zertifikat des Anrufers (DRAM, ~0,8 KB)
 } EebusSrvSlot;
 EebusSrvSlot ESrv;   // Etappe 1: EINE eingehende Verbindung
 
@@ -5847,6 +5949,7 @@ void EebusSrvFree(void) {
   if (ESrv.sock) { ESrv.sock.stop(); }
   ESrv.sock = NetworkClient();   // Socket-Handle loslassen (shared)
   if (ESrv.sc)       { free(ESrv.sc);       ESrv.sc = nullptr; }
+  if (ESrv.x509)     { free(ESrv.x509);     ESrv.x509 = nullptr; }   // v190
   if (ESrv.ibuf)     { free(ESrv.ibuf);     ESrv.ibuf = nullptr; }
   if (ESrv.obuf)     { free(ESrv.obuf);     ESrv.obuf = nullptr; }
   if (ESrv.cert_der) { free(ESrv.cert_der); ESrv.cert_der = nullptr; }
@@ -5871,6 +5974,7 @@ bool EebusSrvStart(void) {
   ESrv.ibuf = (unsigned char*)malloc(EEBUS_SRV_IBUF);
   ESrv.obuf = (unsigned char*)malloc(EEBUS_SRV_OBUF);
   ESrv.cert_der = (uint8_t*)malloc(EEBUS_CERT_DER_SIZE);
+  ESrv.x509 = (EebusSrvX509*)calloc(1, sizeof(EebusSrvX509));   // v190
   ESrv.abuf = (uint8_t*)special_malloc(EEBUS_SRV_ABUF);   // 32 KB -> PSRAM (DRAM schonen), wird wie bisher per free() freigegeben
   ESrv.abuf_len = 0;
   ESrv.ws_state = 0;
@@ -5878,7 +5982,7 @@ bool EebusSrvStart(void) {
   ESrv.sme_state = 0;
   ESrv.conn_idx = -1;
   if ((nullptr == ESrv.sc) || (nullptr == ESrv.ibuf) || (nullptr == ESrv.abuf) ||
-      (nullptr == ESrv.obuf) || (nullptr == ESrv.cert_der)) { why = "malloc"; goto fail; }
+      (nullptr == ESrv.obuf) || (nullptr == ESrv.cert_der) || (nullptr == ESrv.x509)) { why = "malloc"; goto fail; }   // v190: x509
   ESrv.cert_len = EebusLoadDer(EEBUS_CERT_FILE, ESrv.cert_der, EEBUS_CERT_DER_SIZE);
   if (0 == ESrv.cert_len) { why = "cert load"; goto fail; }
   if (!EebusKeyScalar(ESrv.key_scalar)) { why = "key scalar"; goto fail; }
@@ -5920,6 +6024,13 @@ bool EebusSrvStart(void) {
                                 BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN, BR_KEYTYPE_EC,
                                 &br_ec_p256_m15, br_ecdsa_sign_asn1_get_default());
     br_ssl_engine_set_buffers_bidi(eng, ESrv.ibuf, EEBUS_SRV_IBUF, ESrv.obuf, EEBUS_SRV_OBUF);
+   // v190: Zertifikat des Anrufers anfordern und lesen. Ohne Zertifikat (fremdes Geraet, das bei einer nicht
+   // passenden Namensliste keins schickt) laeuft der Handshake weiter - dann Rueckfall auf die Fundliste (IP).
+    ESrv.x509->vtable = &EebusSrvX509Vtable;
+    br_ssl_engine_set_x509(eng, &ESrv.x509->vtable);
+    br_ssl_engine_set_ecdsa(eng, br_ecdsa_vrfy_asn1_get_default());   // CertificateVerify des Anrufers pruefen
+    br_ssl_server_set_trust_anchor_names(ESrv.sc, eebus_srv_dn, 1);
+    br_ssl_engine_add_flags(eng, BR_OPT_TOLERATE_NO_CLIENT_AUTH);
     if (!br_ssl_server_reset(ESrv.sc)) {
       AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV reset fehlgeschlagen, err=%d"),
              br_ssl_engine_last_error(eng));
@@ -6091,10 +6202,23 @@ void EebusSrvLinkConn(void) {
   cc->last_rx = millis();
   strlcpy(cc->peer_ip, ESrv.peer_ip, sizeof(cc->peer_ip));
   strlcpy(cc->peer_ski, ESrv.peer_ip, sizeof(cc->peer_ski));   // Pseudo-SKI (s.o.)
+  cc->ski_quelle = 2;   // v190: erst einmal Rueckfall (Adresse)
+  bool ski_zert = ESrv.x509 && ESrv.x509->have;   // v190: der Anrufer hat sich mit Zertifikat ausgewiesen
+  if (ski_zert) {
+    strlcpy(cc->peer_ski, ESrv.x509->ski, sizeof(cc->peer_ski));
+    cc->ski_quelle = 1;
+    for (uint32_t k = 0; k < Eebus.peer_count; k++) {   // Port/Index nur zur Anzeige, die Identitaet steht schon
+      if (0 == strcasecmp(Eebus.peers[k].ski, cc->peer_ski)) { cc->peer_idx = (int)k; cc->peer_port = Eebus.peers[k].port; break; }
+    }
+    EebusModeApply(cc->peer_ski);
+    AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s weist sich mit Zertifikat aus: SKI %s"), ESrv.peer_ip, cc->peer_ski);
+  } else {
+    AddLog(LOG_LEVEL_INFO, PSTR("EBG: SRV %s ohne Zertifikat - nur ueber die Adresse (Fundliste) zuzuordnen"), ESrv.peer_ip);
+  }
    // Echte SKI des Anrufers ueber seine IP aus der Scan-Liste nachtragen, damit er wie im Client-Weg
    // erkannt wird (Betriebsart HEMS/SteuVE, Anzeige, Wiederaufbau sieht die bestehende Verbindung).
    // Nicht in der Liste -> Pseudo-SKI bleibt, globaler Default gilt.
-  for (uint32_t k = 0; k < Eebus.peer_count; k++) {
+  for (uint32_t k = 0; !ski_zert && (k < Eebus.peer_count); k++) {   // v190: nur noch Rueckfall ohne Zertifikat
     if ((0 == strcmp(Eebus.peers[k].ip, ESrv.peer_ip)) ||
         (Eebus.peers[k].ip6[0] && (0 == strcasecmp(Eebus.peers[k].ip6, ESrv.peer_ip)))) {   // v185: auch IPv6
       strlcpy(cc->peer_ski, Eebus.peers[k].ski, sizeof(cc->peer_ski));
