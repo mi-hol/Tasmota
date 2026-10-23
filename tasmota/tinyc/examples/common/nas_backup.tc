@@ -4,11 +4,12 @@
 // a black box) runs out of space; the data belongs on the NAS. This is the "move files to the NAS" part, written once
 // so that any script can use it.
 //
+// /ftp.cfg: HOST=, USER=, PW=, DIR= each on a line of its own, // comments
 // Setup: /ftp.cfg on the device, four lines, the same file as ftp_log.tc and energy_backup.tc use:
-//     192.168.178.1                    (the IP - a Fritzbox refuses PASV over IPv6, so not fritz.box)
-//     esp
-//     secret
-//     /FRITZ/mediabox/anything.csv     (only its FOLDER counts here)
+//    HOST=192.168.178.1                    (the IP - a Fritzbox refuses PASV over IPv6, so not fritz.box)
+//    USER=esp
+//    PW=secret
+//    DIR=/BACKUP/Tasmota
 // Everything lands in that folder plus a sub folder (nb_sub, default "esp-backup"), created on first use.
 //
 // Use (from TaskLoop - FTP blocks, which is fine there; never from EverySecond):
@@ -30,10 +31,10 @@
 // - A failed transfer stops the round (nb_last holds the code, see "FTP Client" in the reference); nothing is deleted.
 
 char nb_host[64];
-char nb_user[32];
-char nb_pw[32];
+char nb_user[40];
+char nb_pw[40];
 char nb_dir[96];
-char nb_sub[24]  = "esp-backup";    // sub folder next to the file named in /ftp.cfg
+char nb_sub[24]  = "esp-backup";    // sub folder next to the DIR named in /ftp.cfg
 char nb_name[24] = "esp";           // start of the file names on the NAS
 int  nb_ready  = 0;                 // 1 after /ftp.cfg was read and the login worked
 int  nb_last   = 0;                 // last FTP return value (bytes, 0 = ok, < 0 = error)
@@ -58,15 +59,15 @@ int nb_size(char p[]) {
     return n;
 }
 
-// Read /ftp.cfg and log in. name = start of the file names ("" keeps the current one). Returns 0, or a negative code:
+// Read /ftp.cfg and user name = start of the file names ("" keeps the current one). Returns 0, or a negative code:
 // -11 no /ftp.cfg, otherwise the ftpOpen() error.
 int nb_start(char name[]) {
-    if (strlen(name) > 0 && strlen(name) < 24) { strcpy(nb_name, name); }
+    if (strlen(name) > 0 && strlen(name) < 24) { strcpy(nb_name, name); } // todo: sizeof
     nb_ready = 0;
     int f = fileOpen("/ftp.cfg", 0);
     if (f < 0) { return -11; }
     char cfg[320];
-    int n = fileRead(f, cfg, 319);
+    int n = fileRead(f, cfg, 319); // todo: nb_size
     fileClose(f);
     if (n <= 0) { return -11; }
     cfg[n] = 0;
