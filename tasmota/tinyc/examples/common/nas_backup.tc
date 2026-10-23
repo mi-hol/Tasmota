@@ -10,7 +10,7 @@
 //    USER=esp
 //    PW=secret
 //    DIR=/BACKUP/Tasmota
-// Everything lands in that folder plus a sub folder (nb_sub, default "esp-backup"), created on first use.
+// Everything lands in that folder plus a sub folder named after network name of device it originates from!
 //
 // Use (from TaskLoop - FTP blocks, which is fine there; never from EverySecond):
 //   #include "nas_backup.tc"
@@ -34,6 +34,8 @@ char nb_host[64];
 char nb_user[40];
 char nb_pw[40];
 char nb_dir[96];
+
+// todo: replace with logic from https://github.com/mi-hol/tasmota-sml-script/blob/full_backup/tinyc/ftp_backup.tc#L100
 char nb_sub[24]  = "esp-backup";    // sub folder next to the DIR named in /ftp.cfg
 char nb_name[24] = "esp";           // start of the file names on the NAS
 int  nb_ready  = 0;                 // 1 after /ftp.cfg was read and the login worked
@@ -71,6 +73,9 @@ int nb_start(char name[]) {
     fileClose(f);
     if (n <= 0) { return -11; }
     cfg[n] = 0;
+
+// todo: replace with logic from https://github.com/mi-hol/tasmota-sml-script/blob/full_backup/tinyc/ftp_backup.tc#L100
+
     char ziel[96];
     strToken(nb_host, cfg, '\n', 1); nb_trim(nb_host);
     strToken(nb_user, cfg, '\n', 2); nb_trim(nb_user);
